@@ -10,33 +10,23 @@ use nom::{
       map,
   },
   branch::alt,
+  sequence::preceded,
+  multi::many0,
 };
 
 #[derive(Debug, PartialEq)]
-pub enum Ast {
-    Roll(Roll),
-    Expr(Expr),
-}
+pub struct Ast(OpsVal);
 
 pub fn parse(input: &str) -> IResult<&str, Ast> {
-    alt((
-        map(expr, Ast::Expr),
-        map(roll, Ast::Roll),
-    ))(input)
+    map(expr, Ast)(input)
 }
 
 #[derive(Debug, PartialEq)]
 pub struct Dice(u32);
 
+// TODO: This can probably be folded into the Expr
 #[derive(Debug, PartialEq)]
 pub struct Roll(u32, Dice);
-
-#[derive(Debug, PartialEq)]
-pub enum OpsVal {
-    Roll(Roll),
-    Number(u32),
-    Expr(Box<Expr>),
-}
 
 #[derive(Debug, PartialEq)]
 pub enum Oper {
@@ -47,8 +37,11 @@ pub enum Oper {
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Expr(Oper, OpsVal, OpsVal);
-
+pub enum OpsVal {
+    Roll(Roll),
+    Number(u32),
+    Expr(Oper, Box<OpsVal>, Box<OpsVal>),
+}
 
 fn number(input: &str) -> IResult<&str, u32> {
     let radix = 10;
@@ -79,29 +72,52 @@ fn roll(input: &str) -> IResult<&str, Roll> {
     ))
 }
 
+// equiv to factor (in nom example)
 fn ops_val(input: &str) -> IResult<&str, OpsVal> {
     alt((
         map(roll, OpsVal::Roll),
         map(number, OpsVal::Number),
+        // TODO: parens here?
     ))(input)
 }
 
-fn oper(input: &str) -> IResult<&str, Oper> {
-    alt((
-        map(tag("+"), |_| Oper::Add),
-        map(tag("-"), |_| Oper::Sub),
-        map(tag("*"), |_| Oper::Mul),
-        map(tag("/"), |_| Oper::Div),
-    ))(input)
+fn fold_ops_val(initial: OpsVal, remainder: Vec<(Oper, OpsVal)>) -> OpsVal {
+    remainder.into_iter().fold(initial, |acc, pair| {
+        let (oper, val) = pair;
+        OpsVal::Expr(oper, Box::new(acc), Box::new(val))
+    })
 }
 
-// TODO: this does not handle precedence or nested expr
-fn expr(input: &str) -> IResult<&str, Expr> {
-    let (input, val1) = ops_val(input)?;
-    let (input, op)   = oper(input)?;
-    let (input, val2) = ops_val(input)?;
+fn term(input: &str) -> IResult<&str, OpsVal> {
+    let (input, initial)   = ops_val(input)?;
+    let (input, remainder) = many0(alt((
+        map(
+            preceded(tag("*"), ops_val),
+            |i| (Oper::Mul, i)
+        ),
+        map(
+            preceded(tag("/"), ops_val),
+            |i| (Oper::Div, i)
+        ),
+    )))(input)?;
 
-    Ok((input, Expr(op, val1, val2)))
+    Ok((input, fold_ops_val(initial, remainder)))
+}
+
+fn expr(input: &str) -> IResult<&str, OpsVal> {
+    let (input, initial)   = term(input)?;
+    let (input, remainder) = many0(alt((
+        map(
+            preceded(tag("+"), term),
+            |i| (Oper::Add, i)
+        ),
+        map(
+            preceded(tag("-"), term),
+            |i| (Oper::Sub, i)
+        ),
+    )))(input)?;
+
+    Ok((input, fold_ops_val(initial, remainder)))
 }
 
 
@@ -166,49 +182,82 @@ mod test_parser {
     }
 
     #[test]
-    fn test_oper() {
+    fn test_term_mul_fixed_fixed() {
         assert_eq!(
-            oper("+"),
-            Ok(("", Oper::Add))
-        );
-
-        assert_eq!(
-            oper("-"),
-            Ok(("", Oper::Sub))
-        );
-
-        assert_eq!(
-            oper("*"),
-            Ok(("", Oper::Mul))
-        );
-
-        assert_eq!(
-            oper("/"),
-            Ok(("", Oper::Div))
+            term("10*20"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Mul,
+                        Box::new(OpsVal::Number(10)),
+                        Box::new(OpsVal::Number(20))
+            )))
         );
     }
 
     #[test]
-    fn test_ops_add_fixed_fixed() {
+    fn test_term_div_roll_roll_unspecified() {
         assert_eq!(
-            expr("10+20"),
-            Ok(("", Expr(Oper::Add, OpsVal::Number(10), OpsVal::Number(20))))
+            term("d2/2d3"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Div,
+                        Box::new(OpsVal::Roll(Roll(1, Dice(2)))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice(3))))
+            )))
         );
     }
 
     #[test]
-    fn test_ops_sub_roll_roll_unspecified() {
+    fn test_term_mul_fixed_mul_fixed_fixed() {
         assert_eq!(
-            expr("10d20-d5"),
-            Ok(("", Expr(Oper::Sub, OpsVal::Roll(Roll(10, Dice(20))), OpsVal::Roll(Roll(1, Dice(5))))))
+            term("10*20*30"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Mul,
+                        Box::new(OpsVal::Expr(
+                            Oper::Mul,
+                            Box::new(OpsVal::Number(10)),
+                            Box::new(OpsVal::Number(20))
+                        )),
+                        Box::new(OpsVal::Number(30))
+            )))
         );
     }
 
     #[test]
-    fn test_ops_add_fixed_ops_sub_roll_roll_unspecified() {
+    fn test_expr_add_mul_fixed() {
         assert_eq!(
-            expr("5+2d3-d8"),
-            Ok(("", Expr(Oper::Add, OpsVal::Number(10), OpsVal::Expr(Box::new(Expr(Oper::Sub, OpsVal::Roll(Roll(2, Dice(3))), OpsVal::Roll(Roll(1, Dice(8)))))))))
+            expr("10+20*30"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Add,
+                        Box::new(OpsVal::Number(10)),
+                        Box::new(OpsVal::Expr(
+                            Oper::Mul,
+                            Box::new(OpsVal::Number(20)),
+                            Box::new(OpsVal::Number(30))
+                        ))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_expr_all_groups() {
+        assert_eq!(
+            expr("10+d2*10d3/20-d3"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Sub,
+                        Box::new(OpsVal::Expr(
+                            Oper::Add,
+                            Box::new(OpsVal::Number(10)),
+                            Box::new(OpsVal::Expr(
+                                Oper::Div,
+                                Box::new(OpsVal::Expr(
+                                    Oper::Mul,
+                                    Box::new(OpsVal::Roll(Roll(1, Dice(2)))),
+                                    Box::new(OpsVal::Roll(Roll(10, Dice(3))))
+                                )),
+                                Box::new(OpsVal::Number(20))
+                            ))
+                        )),
+                        Box::new(OpsVal::Roll(Roll(1, Dice(3))))
+            )))
         );
     }
 }
