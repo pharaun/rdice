@@ -4,13 +4,17 @@ use nom::{
       tag,
       take_while1,
   },
+  character::complete::multispace0,
   combinator::{
       map_res,
       opt,
       map,
   },
   branch::alt,
-  sequence::preceded,
+  sequence::{
+      preceded,
+      delimited,
+  },
   multi::many0,
 };
 
@@ -37,6 +41,7 @@ pub enum Oper {
     Mod,
 }
 
+// TODO: handle some form of doc string inline ie `2d10 + 2d6[crit] + 5` for eg.
 #[derive(Debug, PartialEq)]
 pub enum OpsVal {
     Roll(Roll),
@@ -75,11 +80,15 @@ fn roll(input: &str) -> IResult<&str, Roll> {
 
 // equiv to factor (in nom example)
 fn ops_val(input: &str) -> IResult<&str, OpsVal> {
-    alt((
-        map(roll, OpsVal::Roll),
-        map(number, OpsVal::Number),
-        // TODO: parens here?
-    ))(input)
+    delimited(
+        multispace0,
+        alt((
+            map(roll, OpsVal::Roll),
+            map(number, OpsVal::Number),
+            // TODO: parens here?
+        )),
+        multispace0
+    )(input)
 }
 
 fn fold_ops_val(initial: OpsVal, remainder: Vec<(Oper, OpsVal)>) -> OpsVal {
@@ -265,4 +274,21 @@ mod test_parser {
             )))
         );
     }
+
+    #[test]
+    fn test_spaceing() {
+        assert_eq!(
+            expr("  10 + d2 *  10d20  "),
+            Ok(("", OpsVal::Expr(
+                        Oper::Add,
+                        Box::new(OpsVal::Number(10)),
+                        Box::new(OpsVal::Expr(
+                            Oper::Mul,
+                            Box::new(OpsVal::Roll(Roll(1, Dice(2)))),
+                            Box::new(OpsVal::Roll(Roll(10, Dice(20))))
+                        ))
+            )))
+        );
+    }
+
 }
