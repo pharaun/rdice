@@ -1,10 +1,3 @@
-mod lexer;
-mod parser;
+extern crate nom;
 
-pub fn parse_dice(input: &str) -> parser::Ast {
-    parser::parse(
-        lexer::Lexer::new(
-            input
-        )
-    )
-}
+pub mod parser;
