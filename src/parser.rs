@@ -26,12 +26,12 @@ macro_rules! wrap_value {
 #[derive(Debug, PartialEq)]
 pub enum Ast {
     Roll(Roll),
-    Ops(Ops),
+    Expr(Expr),
 }
 
 pub fn parse(input: &str) -> IResult<&str, Ast> {
     alt((
-        wrap_value!(ops, Ast::Ops),
+        wrap_value!(expr, Ast::Expr),
         wrap_value!(roll, Ast::Roll),
     ))(input)
 }
@@ -46,16 +46,19 @@ pub struct Roll(u32, Dice);
 pub enum OpsVal {
     Roll(Roll),
     Number(u32),
+    Expr(Box<Expr>),
 }
 
 #[derive(Debug, PartialEq)]
-pub enum OpsType {
+pub enum Oper {
     Add,
     Sub,
+    Mul,
+    Div,
 }
 
 #[derive(Debug, PartialEq)]
-pub struct Ops(OpsType, OpsVal, OpsVal);
+pub struct Expr(Oper, OpsVal, OpsVal);
 
 
 fn number(input: &str) -> IResult<&str, u32> {
@@ -94,20 +97,22 @@ fn ops_val(input: &str) -> IResult<&str, OpsVal> {
     ))(input)
 }
 
-fn ops_type(input: &str) -> IResult<&str, OpsType> {
+fn oper(input: &str) -> IResult<&str, Oper> {
     alt((
-        wrap_value!(tag("+"), |_| OpsType::Add),
-        wrap_value!(tag("-"), |_| OpsType::Sub),
+        wrap_value!(tag("+"), |_| Oper::Add),
+        wrap_value!(tag("-"), |_| Oper::Sub),
+        wrap_value!(tag("*"), |_| Oper::Mul),
+        wrap_value!(tag("/"), |_| Oper::Div),
     ))(input)
 }
 
-// TODO: this does not handle precedence or nested ops
-fn ops(input: &str) -> IResult<&str, Ops> {
+// TODO: this does not handle precedence or nested expr
+fn expr(input: &str) -> IResult<&str, Expr> {
     let (input, val1) = ops_val(input)?;
-    let (input, op)   = ops_type(input)?;
+    let (input, op)   = oper(input)?;
     let (input, val2) = ops_val(input)?;
 
-    Ok((input, Ops(op, val1, val2)))
+    Ok((input, Expr(op, val1, val2)))
 }
 
 
@@ -172,31 +177,49 @@ mod test_parser {
     }
 
     #[test]
-    fn test_ops_type() {
+    fn test_oper() {
         assert_eq!(
-            ops_type("+"),
-            Ok(("", OpsType::Add))
+            oper("+"),
+            Ok(("", Oper::Add))
         );
 
         assert_eq!(
-            ops_type("-"),
-            Ok(("", OpsType::Sub))
+            oper("-"),
+            Ok(("", Oper::Sub))
+        );
+
+        assert_eq!(
+            oper("*"),
+            Ok(("", Oper::Mul))
+        );
+
+        assert_eq!(
+            oper("/"),
+            Ok(("", Oper::Div))
         );
     }
 
     #[test]
     fn test_ops_add_fixed_fixed() {
         assert_eq!(
-            ops("10+20"),
-            Ok(("", Ops(OpsType::Add, OpsVal::Number(10), OpsVal::Number(20))))
+            expr("10+20"),
+            Ok(("", Expr(Oper::Add, OpsVal::Number(10), OpsVal::Number(20))))
         );
     }
 
     #[test]
     fn test_ops_sub_roll_roll_unspecified() {
         assert_eq!(
-            ops("10d20-d5"),
-            Ok(("", Ops(OpsType::Sub, OpsVal::Roll(Roll(10, Dice(20))), OpsVal::Roll(Roll(1, Dice(5))))))
+            expr("10d20-d5"),
+            Ok(("", Expr(Oper::Sub, OpsVal::Roll(Roll(10, Dice(20))), OpsVal::Roll(Roll(1, Dice(5))))))
+        );
+    }
+
+    #[test]
+    fn test_ops_add_fixed_ops_sub_roll_roll_unspecified() {
+        assert_eq!(
+            expr("5+2d3-d8"),
+            Ok(("", Expr(Oper::Add, OpsVal::Number(10), OpsVal::Expr(Box::new(Expr(Oper::Sub, OpsVal::Roll(Roll(2, Dice(3))), OpsVal::Roll(Roll(1, Dice(8)))))))))
         );
     }
 }
