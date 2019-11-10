@@ -7,21 +7,10 @@ use nom::{
   combinator::{
       map_res,
       opt,
+      map,
   },
   branch::alt,
 };
-
-// Repeative pattern of accepting an parse then rewrapping the value of the parse
-macro_rules! wrap_value {
-    ($func:expr, $val:expr) => {
-        {
-            |i| {
-                let (input, val) = $func(i)?;
-                Ok((input, $val(val)))
-            }
-        }
-    }
-}
 
 #[derive(Debug, PartialEq)]
 pub enum Ast {
@@ -31,8 +20,8 @@ pub enum Ast {
 
 pub fn parse(input: &str) -> IResult<&str, Ast> {
     alt((
-        wrap_value!(expr, Ast::Expr),
-        wrap_value!(roll, Ast::Roll),
+        map(expr, Ast::Expr),
+        map(roll, Ast::Roll),
     ))(input)
 }
 
@@ -92,17 +81,17 @@ fn roll(input: &str) -> IResult<&str, Roll> {
 
 fn ops_val(input: &str) -> IResult<&str, OpsVal> {
     alt((
-        wrap_value!(roll, OpsVal::Roll),
-        wrap_value!(number, OpsVal::Number),
+        map(roll, OpsVal::Roll),
+        map(number, OpsVal::Number),
     ))(input)
 }
 
 fn oper(input: &str) -> IResult<&str, Oper> {
     alt((
-        wrap_value!(tag("+"), |_| Oper::Add),
-        wrap_value!(tag("-"), |_| Oper::Sub),
-        wrap_value!(tag("*"), |_| Oper::Mul),
-        wrap_value!(tag("/"), |_| Oper::Div),
+        map(tag("+"), |_| Oper::Add),
+        map(tag("-"), |_| Oper::Sub),
+        map(tag("*"), |_| Oper::Mul),
+        map(tag("/"), |_| Oper::Div),
     ))(input)
 }
 
