@@ -34,6 +34,7 @@ pub enum Oper {
     Sub,
     Mul,
     Div,
+    Mod,
 }
 
 #[derive(Debug, PartialEq)]
@@ -98,6 +99,10 @@ fn term(input: &str) -> IResult<&str, OpsVal> {
         map(
             preceded(tag("/"), ops_val),
             |i| (Oper::Div, i)
+        ),
+        map(
+            preceded(tag("%"), ops_val),
+            |i| (Oper::Mod, i)
         ),
     )))(input)?;
 
