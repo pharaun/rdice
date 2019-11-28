@@ -41,11 +41,15 @@ pub struct Dice(Num, DiceMeta);
 pub enum DiceMeta {
     Plain,
     Exploding(DiceOper),
+    Compounding(DiceOper),
+    Penetrating(DiceOper),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum DiceOper {
-    IEq, // Implicit Eq
+    // Implicit Eq, to support `d[[2d10]]!` notion (Otherwise it would be stored as
+    // d[[2d10]]![[2d10]] and evaulated twice which could diverge)
+    IEq,
     Eq(Num),
     Gt(Num),
     Lt(Num),
@@ -118,15 +122,29 @@ fn dice_oper(input: &str) -> IResult<&str, DiceOper> {
 }
 
 fn dice_meta(input: &str) -> IResult<&str, DiceMeta> {
-    let (input, exploding) = opt(tag("!"))(input)?;
+    let (input, meta) = opt(alt((
+        map(
+            preceded(tag("!!"), dice_oper),
+            |i| DiceMeta::Compounding(i)
+        ),
+        map(
+            preceded(tag("!p"), dice_oper),
+            |i| DiceMeta::Penetrating(i)
+        ),
+        map(
+            preceded(tag("!"), dice_oper),
+            |i| DiceMeta::Exploding(i)
+        ),
+    )))(input)?;
 
-    match exploding {
-        None    => Ok((input, DiceMeta::Plain)),
-        Some(_) => {
-            let (input, oper) = dice_oper(input)?;
-            Ok((input, DiceMeta::Exploding(oper)))
-        },
-    }
+    // TODO: find a good way to handle 'fallback' values
+    Ok((
+        input,
+        match meta {
+            None    => DiceMeta::Plain,
+            Some(x) => x,
+        }
+    ))
 }
 
 fn dice(input: &str) -> IResult<&str, Dice> {
@@ -452,6 +470,22 @@ mod test_parser {
                     DiceOper::Eq(Num::Inline(Box::new(OpsVal::Number(Num::Num(10)))))
                 )
             )))
+        );
+    }
+
+    #[test]
+    fn test_dice_compounding_lt() {
+        assert_eq!(
+            dice("d10!!<10"),
+            Ok(("", Dice(Num::Num(10), DiceMeta::Compounding(DiceOper::Lt(Num::Num(10))))))
+        );
+    }
+
+    #[test]
+    fn test_dice_penetrating_lt() {
+        assert_eq!(
+            dice("d10!p<10"),
+            Ok(("", Dice(Num::Num(10), DiceMeta::Penetrating(DiceOper::Lt(Num::Num(10))))))
         );
     }
 }
