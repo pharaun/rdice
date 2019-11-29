@@ -65,11 +65,14 @@ pub struct Roll(Num, Dice, Vec<RollMeta>);
 
 // TODO: not sure we want to allow anything other than plain outcome for a RollMeta inside an
 // Inline Expression
+// TODO: consider separating the Eq/Gt/Lt meta to its own (success meta)
 #[derive(Debug, PartialEq)]
 pub enum RollMeta {
     Eq(Num),
     Gt(Num),
+    GEq(Num),
     Lt(Num),
+    LEq(Num),
 }
 
 #[derive(Debug, PartialEq)]
@@ -181,8 +184,16 @@ fn delimited_dice(input: &str) -> IResult<&str, Dice> {
 fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
     alt((
         map(
+            preceded(tag(">="), num),
+            |i| RollMeta::GEq(i)
+        ),
+        map(
             preceded(tag(">"), num),
             |i| RollMeta::Gt(i)
+        ),
+        map(
+            preceded(tag("<="), num),
+            |i| RollMeta::LEq(i)
         ),
         map(
             preceded(tag("<"), num),
@@ -553,6 +564,22 @@ mod test_parser {
         assert_eq!(
             roll("d10>2"),
             Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Gt(Num::Num(2))])))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_leq() {
+        assert_eq!(
+            roll("d10<=2"),
+            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::LEq(Num::Num(2))])))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_geq() {
+        assert_eq!(
+            roll("d10>=2"),
+            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::GEq(Num::Num(2))])))
         );
     }
 
