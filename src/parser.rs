@@ -69,6 +69,8 @@ pub struct Roll(Num, Dice, Vec<RollMeta>);
 pub enum RollMeta {
     Drop(HiLo, Num),
     Keep(HiLo, Num),
+
+    // Only for display
 }
 
 #[derive(Debug, PartialEq)]
@@ -95,6 +97,10 @@ pub enum OpsVal {
 
     // TODO: i think this is an terminal value, so it should be in its own type but let's put it
     // here for now.
+    // TODO: this may need further work, since ie it would need to eval each dice roll 1 by 1 ie
+    // 10d5+2 > 3 -> any of the d5+2 that is greater than 3 is then a success for eg...
+    // Probably can do 2 terminals (a sum one, or a Target val one) since the evaulation strategy
+    // will vary
     Target(TargetOper, Num, Box<OpsVal>),
 }
 
@@ -138,6 +144,10 @@ fn dice_oper(input: &str) -> IResult<&str, DiceOper> {
         map(
             preceded(tag("<"), num),
             |i| DiceOper::Lt(i)
+        ),
+        map(
+            preceded(tag("="), num),
+            |i| DiceOper::Eq(i)
         ),
         map(num, DiceOper::Eq))
     ))(input)?;
@@ -549,6 +559,15 @@ mod test_parser {
     }
 
     #[test]
+    fn test_dice_exploding_double_explicit_eq() {
+        assert_eq!(
+            dice("d10!=10"),
+            Ok(("", Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(10))))))
+        );
+    }
+
+
+    #[test]
     fn test_dice_exploding_gt() {
         assert_eq!(
             dice("d10!>10"),
@@ -718,22 +737,6 @@ mod test_parser {
                     Num::Num(1),
                     Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(3)))),
                     vec![RollMeta::Drop(HiLo::Low, Num::Num(1))]
-                )))
-            )))
-        );
-    }
-
-    #[test]
-    fn test_roll_dice_eq_meta() {
-        assert_eq!(
-            target("d10!=2"),
-            Ok(("", OpsVal::Target(
-                TargetOper::Eq,
-                Num::Num(2),
-                Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
-                    vec![]
                 )))
             )))
         );
