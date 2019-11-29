@@ -22,7 +22,7 @@ use nom::{
 pub struct Ast(OpsVal);
 
 pub fn parse(input: &str) -> IResult<&str, Ast> {
-    map(expr, Ast)(input)
+    map(target, Ast)(input)
 }
 
 // We can inline an expr where-ever a number is accepted
@@ -65,21 +65,10 @@ pub struct Roll(Num, Dice, Vec<RollMeta>);
 
 // TODO: not sure we want to allow anything other than plain outcome for a RollMeta inside an
 // Inline Expression
-// TODO: consider separating the Eq/Gt/Lt meta to its own (success meta)
 #[derive(Debug, PartialEq)]
 pub enum RollMeta {
-    Target(RollOper, Num),
     Drop(HiLo, Num),
     Keep(HiLo, Num),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum RollOper {
-    Eq,
-    Gt,
-    GEq,
-    Lt,
-    LEq,
 }
 
 #[derive(Debug, PartialEq)]
@@ -103,7 +92,21 @@ pub enum OpsVal {
     Roll(Roll),
     Number(Num),
     Expr(Oper, Box<OpsVal>, Box<OpsVal>),
+
+    // TODO: i think this is an terminal value, so it should be in its own type but let's put it
+    // here for now.
+    Target(TargetOper, Num, Box<OpsVal>),
 }
+
+#[derive(Debug, PartialEq)]
+pub enum TargetOper {
+    Eq,
+    Gt,
+    GEq,
+    Lt,
+    LEq,
+}
+
 
 fn number(input: &str) -> IResult<&str, u32> {
     let radix = 10;
@@ -182,41 +185,8 @@ fn dice(input: &str) -> IResult<&str, Dice> {
     Ok((input, Dice(digit, meta)))
 }
 
-// TODO: make the {} delimitation apply more broadly
-fn delimited_dice(input: &str) -> IResult<&str, Dice> {
-    alt((
-        dice,
-        delimited(
-            tag("{"),
-            dice,
-            tag("}")
-        ),
-    ))(input)
-}
-
-// TODO: separate the tag/RollOper bits into its own parser func
 fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
     alt((
-        map(
-            preceded(tag(">="), num),
-            |i| RollMeta::Target(RollOper::GEq, i)
-        ),
-        map(
-            preceded(tag(">"), num),
-            |i| RollMeta::Target(RollOper::Gt, i)
-        ),
-        map(
-            preceded(tag("<="), num),
-            |i| RollMeta::Target(RollOper::LEq, i)
-        ),
-        map(
-            preceded(tag("<"), num),
-            |i| RollMeta::Target(RollOper::Lt, i)
-        ),
-        map(
-            preceded(tag("="), num),
-            |i| RollMeta::Target(RollOper::Eq, i)
-        ),
         map(
             preceded(tag("dl"), num),
             |i| RollMeta::Drop(HiLo::Low, i)
@@ -248,7 +218,7 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
 
 fn roll(input: &str) -> IResult<&str, Roll> {
     let (input, roll) = opt(num)(input)?;
-    let (input, dice) = delimited_dice(input)?;
+    let (input, dice) = dice(input)?;
     let (input, meta) = many0(roll_meta)(input)?;
 
     Ok((input,
@@ -313,6 +283,46 @@ fn expr(input: &str) -> IResult<&str, OpsVal> {
     )))(input)?;
 
     Ok((input, fold_ops_val(initial, remainder)))
+}
+
+// TODO: make the {} delimitation apply more broadly
+fn target(input: &str) -> IResult<&str, OpsVal> {
+    let (input, opsval) = alt((
+        expr,
+        delimited(
+            tag("{"),
+            expr,
+            tag("}"),
+        ),
+    ))(input)?;
+
+    let (input, ttarget) = opt(alt((
+        map(
+            preceded(tag(">="), num),
+            |i| (TargetOper::GEq, i)
+        ),
+        map(
+            preceded(tag(">"), num),
+            |i| (TargetOper::Gt, i)
+        ),
+        map(
+            preceded(tag("<="), num),
+            |i| (TargetOper::LEq, i)
+        ),
+        map(
+            preceded(tag("<"), num),
+            |i| (TargetOper::Lt, i)
+        ),
+        map(
+            preceded(tag("="), num),
+            |i| (TargetOper::Eq, i)
+        )
+    )))(input)?;
+
+    Ok((input, match ttarget {
+        None         => opsval,
+        Some((t, n)) => OpsVal::Target(t, n, Box::new(opsval)),
+    }))
 }
 
 
@@ -584,82 +594,6 @@ mod test_parser {
     }
 
     #[test]
-    fn test_roll_unspecified_roll_meta_eq() {
-        assert_eq!(
-            roll("d10=2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Target(RollOper::Eq, Num::Num(2))])))
-        );
-    }
-
-    #[test]
-    fn test_roll_unspecified_roll_meta_lt() {
-        assert_eq!(
-            roll("d10<2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Target(RollOper::Lt, Num::Num(2))])))
-        );
-    }
-
-    #[test]
-    fn test_roll_unspecified_roll_meta_gt() {
-        assert_eq!(
-            roll("d10>2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Target(RollOper::Gt, Num::Num(2))])))
-        );
-    }
-
-    #[test]
-    fn test_roll_unspecified_roll_meta_leq() {
-        assert_eq!(
-            roll("d10<=2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Target(RollOper::LEq, Num::Num(2))])))
-        );
-    }
-
-    #[test]
-    fn test_roll_unspecified_roll_meta_geq() {
-        assert_eq!(
-            roll("d10>=2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Target(RollOper::GEq, Num::Num(2))])))
-        );
-    }
-
-    #[test]
-    fn test_roll_dice_nested_meta() {
-        assert_eq!(
-            roll("d10!3>2"),
-            Ok(("", Roll(
-                Num::Num(1),
-                Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(3)))),
-                vec![RollMeta::Target(RollOper::Gt, Num::Num(2))]
-            )))
-        );
-    }
-
-    #[test]
-    fn test_roll_dice_eq_meta() {
-        assert_eq!(
-            roll("d10!=2"),
-            Ok(("", Roll(
-                Num::Num(1),
-                Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
-                vec![RollMeta::Target(RollOper::Eq, Num::Num(2))]
-            )))
-        );
-    }
-
-    #[test]
-    fn test_roll_braced_meta() {
-        assert_eq!(
-            roll("{d10!}>2"),
-            Ok(("", Roll(
-                Num::Num(1),
-                Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
-                vec![RollMeta::Target(RollOper::Gt, Num::Num(2))]
-            )))
-        );
-    }
-
-    #[test]
     fn test_roll_unspecified_drop() {
         assert_eq!(
             roll("d10dl1dh2d3"),
@@ -689,6 +623,166 @@ mod test_parser {
                     RollMeta::Keep(HiLo::High, Num::Num(2)),
                     RollMeta::Keep(HiLo::High, Num::Num(3)),
                 ]
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_eq() {
+        assert_eq!(
+            target("d10=2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Eq,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Plain),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_lt() {
+        assert_eq!(
+            target("d10<2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Lt,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Plain),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_gt() {
+        assert_eq!(
+            target("d10>2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Gt,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Plain),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_leq() {
+        assert_eq!(
+            target("d10<=2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::LEq,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Plain),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_geq() {
+        assert_eq!(
+            target("d10>=2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::GEq,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Plain),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_dice_nested_meta() {
+        assert_eq!(
+            target("d10!3d1>2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Gt,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(3)))),
+                    vec![RollMeta::Drop(HiLo::Low, Num::Num(1))]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_dice_eq_meta() {
+        assert_eq!(
+            target("d10!=2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Eq,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_braced_meta() {
+        assert_eq!(
+            target("{d10!}>2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Gt,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
+                    vec![]
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_target_modifier() {
+        assert_eq!(
+            target("d10+1>3"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Gt,
+                Num::Num(3),
+                Box::new(OpsVal::Expr(
+                    Oper::Add,
+                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
+                    Box::new(OpsVal::Number(Num::Num(1)))
+                ))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_target_modifier_braced() {
+        assert_eq!(
+            target("{d10+1}>3"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Gt,
+                Num::Num(3),
+                Box::new(OpsVal::Expr(
+                    Oper::Add,
+                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
+                    Box::new(OpsVal::Number(Num::Num(1)))
+                ))
             )))
         );
     }
