@@ -73,6 +73,14 @@ pub enum RollMeta {
     GEq(Num),
     Lt(Num),
     LEq(Num),
+    Drop(HiLo, Num),
+    Keep(HiLo, Num),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum HiLo {
+    High,
+    Low,
 }
 
 #[derive(Debug, PartialEq)]
@@ -202,6 +210,32 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
         map(
             preceded(tag("="), num),
             |i| RollMeta::Eq(i)
+        ),
+        map(
+            preceded(tag("dl"), num),
+            |i| RollMeta::Drop(HiLo::Low, i)
+        ),
+        // Alias for dl
+        map(
+            preceded(tag("d"), num),
+            |i| RollMeta::Drop(HiLo::Low, i)
+        ),
+        map(
+            preceded(tag("dh"), num),
+            |i| RollMeta::Drop(HiLo::High, i)
+        ),
+        map(
+            preceded(tag("kl"), num),
+            |i| RollMeta::Keep(HiLo::Low, i)
+        ),
+        map(
+            preceded(tag("kh"), num),
+            |i| RollMeta::Keep(HiLo::High, i)
+        ),
+        // Alias for kh
+        map(
+            preceded(tag("k"), num),
+            |i| RollMeta::Keep(HiLo::High, i)
         )
     ))(input)
 }
@@ -615,6 +649,40 @@ mod test_parser {
                 Num::Num(1),
                 Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
                 vec![RollMeta::Gt(Num::Num(2))]
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_drop() {
+        assert_eq!(
+            roll("d10dl1dh2d3"),
+            Ok(("", Roll(
+                Num::Num(1),
+                Dice(Num::Num(10),
+                DiceMeta::Plain),
+                vec![
+                    RollMeta::Drop(HiLo::Low, Num::Num(1)),
+                    RollMeta::Drop(HiLo::High, Num::Num(2)),
+                    RollMeta::Drop(HiLo::Low, Num::Num(3)),
+                ]
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_keep() {
+        assert_eq!(
+            roll("d10kl1kh2k3"),
+            Ok(("", Roll(
+                Num::Num(1),
+                Dice(Num::Num(10),
+                DiceMeta::Plain),
+                vec![
+                    RollMeta::Keep(HiLo::Low, Num::Num(1)),
+                    RollMeta::Keep(HiLo::High, Num::Num(2)),
+                    RollMeta::Keep(HiLo::High, Num::Num(3)),
+                ]
             )))
         );
     }
