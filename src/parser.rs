@@ -56,7 +56,6 @@ pub enum DiceOper {
     Lt(Num),
 }
 
-
 // TODO: This can probably be folded into the Expr
 // TODO: Consider breaking this into the full roll and 'limited' roll for inside inline expressions
 // TODO: RollMeta -> Vec, because can have multiple effects on a roll pool (ie keep, drop, ...)
@@ -69,14 +68,24 @@ pub struct Roll(Num, Dice, Vec<RollMeta>);
 pub enum RollMeta {
     Drop(HiLo, Num),
     Keep(HiLo, Num),
+    Reroll(EqOper, Num),
 
-    // Only for display
+    // TODO: Critcal Success + Fumble - only for display purpose
+    CriticalSuccess(EqOper, Num),
+    CriticalFumble(EqOper, Num),
 }
 
 #[derive(Debug, PartialEq)]
 pub enum HiLo {
     High,
     Low,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum EqOper {
+    Eq,
+    Gt,
+    Lt,
 }
 
 #[derive(Debug, PartialEq)]
@@ -222,7 +231,57 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
         map(
             preceded(tag("k"), num),
             |i| RollMeta::Keep(HiLo::High, i)
-        )
+        ),
+        // Rerolls
+        map(
+            preceded(tag("r>"), num),
+            |i| RollMeta::Reroll(EqOper::Gt, i)
+        ),
+        map(
+            preceded(tag("r<"), num),
+            |i| RollMeta::Reroll(EqOper::Lt, i)
+        ),
+        map(
+            preceded(tag("r"), num),
+            |i| RollMeta::Reroll(EqOper::Eq, i)
+        ),
+        map(
+            preceded(tag("r="), num),
+            |i| RollMeta::Reroll(EqOper::Eq, i)
+        ),
+        // Critical Success, Critical Fumble
+        map(
+            preceded(tag("cs>"), num),
+            |i| RollMeta::CriticalSuccess(EqOper::Gt, i)
+        ),
+        map(
+            preceded(tag("cs<"), num),
+            |i| RollMeta::CriticalSuccess(EqOper::Lt, i)
+        ),
+        map(
+            preceded(tag("cs"), num),
+            |i| RollMeta::CriticalSuccess(EqOper::Eq, i)
+        ),
+        map(
+            preceded(tag("cs="), num),
+            |i| RollMeta::CriticalSuccess(EqOper::Eq, i)
+        ),
+        map(
+            preceded(tag("cf>"), num),
+            |i| RollMeta::CriticalFumble(EqOper::Gt, i)
+        ),
+        map(
+            preceded(tag("cf<"), num),
+            |i| RollMeta::CriticalFumble(EqOper::Lt, i)
+        ),
+        map(
+            preceded(tag("cf"), num),
+            |i| RollMeta::CriticalFumble(EqOper::Eq, i)
+        ),
+        map(
+            preceded(tag("cf="), num),
+            |i| RollMeta::CriticalFumble(EqOper::Eq, i)
+        ),
     ))(input)
 }
 
@@ -369,6 +428,36 @@ mod test_parser {
         assert_eq!(
             roll("d10"),
             Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![])))
+        );
+    }
+
+    #[test]
+    fn test_roll_critical() {
+        assert_eq!(
+            roll("d10cs10cf>2"),
+            Ok(("", Roll(
+                Num::Num(1),
+                Dice(Num::Num(10), DiceMeta::Plain),
+                vec![
+                    RollMeta::CriticalSuccess(EqOper::Eq, Num::Num(10)),
+                    RollMeta::CriticalFumble(EqOper::Gt, Num::Num(2)),
+                ]
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_reroll() {
+        assert_eq!(
+            roll("d10r10r>2"),
+            Ok(("", Roll(
+                Num::Num(1),
+                Dice(Num::Num(10), DiceMeta::Plain),
+                vec![
+                    RollMeta::Reroll(EqOper::Eq, Num::Num(10)),
+                    RollMeta::Reroll(EqOper::Gt, Num::Num(2)),
+                ]
+            )))
         );
     }
 
