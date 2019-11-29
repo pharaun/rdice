@@ -58,15 +58,15 @@ pub enum DiceOper {
 
 
 // TODO: This can probably be folded into the Expr
-// TODO: add roll meta (for whole dice group effects)
+// TODO: Consider breaking this into the full roll and 'limited' roll for inside inline expressions
+// TODO: RollMeta -> Vec, because can have multiple effects on a roll pool (ie keep, drop, ...)
 #[derive(Debug, PartialEq)]
-pub struct Roll(Num, Dice, RollMeta);
+pub struct Roll(Num, Dice, Vec<RollMeta>);
 
 // TODO: not sure we want to allow anything other than plain outcome for a RollMeta inside an
 // Inline Expression
 #[derive(Debug, PartialEq)]
 pub enum RollMeta {
-    Plain,
     Eq(Num),
     Gt(Num),
     Lt(Num),
@@ -166,6 +166,7 @@ fn dice(input: &str) -> IResult<&str, Dice> {
     Ok((input, Dice(digit, meta)))
 }
 
+// TODO: make the {} delimitation apply more broadly
 fn delimited_dice(input: &str) -> IResult<&str, Dice> {
     alt((
         dice,
@@ -178,7 +179,7 @@ fn delimited_dice(input: &str) -> IResult<&str, Dice> {
 }
 
 fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
-    let (input, oper) = opt(alt((
+    alt((
         map(
             preceded(tag(">"), num),
             |i| RollMeta::Gt(i)
@@ -191,21 +192,13 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
             preceded(tag("="), num),
             |i| RollMeta::Eq(i)
         )
-    )))(input)?;
-
-    Ok((
-        input,
-        match oper {
-            None    => RollMeta::Plain,
-            Some(x) => x,
-        }
-    ))
+    ))(input)
 }
 
 fn roll(input: &str) -> IResult<&str, Roll> {
     let (input, roll) = opt(num)(input)?;
     let (input, dice) = delimited_dice(input)?;
-    let (input, meta) = roll_meta(input)?;
+    let (input, meta) = many0(roll_meta)(input)?;
 
     Ok((input,
         match roll {
@@ -296,7 +289,7 @@ mod test_parser {
     fn test_roll() {
         assert_eq!(
             roll("5d10"),
-            Ok(("", Roll(Num::Num(5), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Plain)))
+            Ok(("", Roll(Num::Num(5), Dice(Num::Num(10), DiceMeta::Plain), vec![])))
         );
     }
 
@@ -304,7 +297,7 @@ mod test_parser {
     fn test_roll_unspecified() {
         assert_eq!(
             roll("d10"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Plain)))
+            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![])))
         );
     }
 
@@ -312,7 +305,7 @@ mod test_parser {
     fn test_ops_val_roll() {
         assert_eq!(
             ops_val("10d10"),
-            Ok(("", OpsVal::Roll(Roll(Num::Num(10), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Plain))))
+            Ok(("", OpsVal::Roll(Roll(Num::Num(10), Dice(Num::Num(10), DiceMeta::Plain), vec![]))))
         );
     }
 
@@ -320,7 +313,7 @@ mod test_parser {
     fn test_ops_val_roll_unspecified() {
         assert_eq!(
             ops_val("d10"),
-            Ok(("", OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Plain))))
+            Ok(("", OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![]))))
         );
     }
 
@@ -350,8 +343,8 @@ mod test_parser {
             term("d2/2d3"),
             Ok(("", OpsVal::Expr(
                         Oper::Div,
-                        Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(2), DiceMeta::Plain), RollMeta::Plain))),
-                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice(Num::Num(3), DiceMeta::Plain), RollMeta::Plain)))
+                        Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice(Num::Num(3), DiceMeta::Plain), vec![])))
             )))
         );
     }
@@ -401,13 +394,13 @@ mod test_parser {
                                 Oper::Div,
                                 Box::new(OpsVal::Expr(
                                     Oper::Mul,
-                                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(2), DiceMeta::Plain), RollMeta::Plain))),
-                                    Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice(Num::Num(3), DiceMeta::Plain), RollMeta::Plain)))
+                                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                                    Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice(Num::Num(3), DiceMeta::Plain), vec![])))
                                 )),
                                 Box::new(OpsVal::Number(Num::Num(20)))
                             ))
                         )),
-                        Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(3), DiceMeta::Plain), RollMeta::Plain)))
+                        Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(3), DiceMeta::Plain), vec![])))
             )))
         );
     }
@@ -421,8 +414,8 @@ mod test_parser {
                         Box::new(OpsVal::Number(Num::Num(10))),
                         Box::new(OpsVal::Expr(
                             Oper::Mul,
-                            Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(2), DiceMeta::Plain), RollMeta::Plain))),
-                            Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice(Num::Num(20), DiceMeta::Plain), RollMeta::Plain)))
+                            Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice(Num::Num(20), DiceMeta::Plain), vec![])))
                         ))
             )))
         );
@@ -436,14 +429,14 @@ mod test_parser {
                         Roll(Num::Inline(Box::new(OpsVal::Roll(Roll(
                             Num::Num(1),
                             Dice(Num::Num(3), DiceMeta::Plain),
-                            RollMeta::Plain
+                            vec![]
                         )))),
                         Dice(Num::Inline(Box::new(OpsVal::Expr(
                             Oper::Add,
-                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice(Num::Num(4), DiceMeta::Plain), RollMeta::Plain))),
+                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice(Num::Num(4), DiceMeta::Plain), vec![]))),
                             Box::new(OpsVal::Number(Num::Num(1)))
                         ))), DiceMeta::Plain),
-                        RollMeta::Plain
+                        vec![]
             ))))
         );
     }
@@ -543,7 +536,7 @@ mod test_parser {
     fn test_roll_unspecified_roll_meta_eq() {
         assert_eq!(
             roll("d10=2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Eq(Num::Num(2)))))
+            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Eq(Num::Num(2))])))
         );
     }
 
@@ -551,7 +544,7 @@ mod test_parser {
     fn test_roll_unspecified_roll_meta_lt() {
         assert_eq!(
             roll("d10<2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Lt(Num::Num(2)))))
+            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Lt(Num::Num(2))])))
         );
     }
 
@@ -559,7 +552,7 @@ mod test_parser {
     fn test_roll_unspecified_roll_meta_gt() {
         assert_eq!(
             roll("d10>2"),
-            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), RollMeta::Gt(Num::Num(2)))))
+            Ok(("", Roll(Num::Num(1), Dice(Num::Num(10), DiceMeta::Plain), vec![RollMeta::Gt(Num::Num(2))])))
         );
     }
 
@@ -570,7 +563,7 @@ mod test_parser {
             Ok(("", Roll(
                 Num::Num(1),
                 Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(3)))),
-                RollMeta::Gt(Num::Num(2))
+                vec![RollMeta::Gt(Num::Num(2))]
             )))
         );
     }
@@ -582,7 +575,7 @@ mod test_parser {
             Ok(("", Roll(
                 Num::Num(1),
                 Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
-                RollMeta::Eq(Num::Num(2))
+                vec![RollMeta::Eq(Num::Num(2))]
             )))
         );
     }
@@ -594,7 +587,7 @@ mod test_parser {
             Ok(("", Roll(
                 Num::Num(1),
                 Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
-                RollMeta::Gt(Num::Num(2))
+                vec![RollMeta::Gt(Num::Num(2))]
             )))
         );
     }
