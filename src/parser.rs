@@ -18,6 +18,7 @@ use nom::{
   multi::many0,
 };
 
+// TODO: at some point reorganize the AST and remove features i don't care/want to implement.
 #[derive(Debug, PartialEq)]
 pub struct Ast(OpsVal);
 
@@ -109,6 +110,9 @@ pub enum OpsVal {
     Roll(Roll),
     Number(Num),
     Expr(Oper, Box<OpsVal>, Box<OpsVal>),
+    // TODO: Func call ie.
+    // Func(&str (name), Box<OpsVal>),
+    // for - floor/ceiling/abs/round (question tho of floating value calculation....)
 
     // TODO: i think this is an terminal value, so it should be in its own type but let's put it
     // here for now.
