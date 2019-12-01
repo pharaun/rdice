@@ -118,6 +118,7 @@ pub enum Oper {
     Mul,
     Div,
     Mod,
+    Pow,
 }
 
 // TODO: handle some form of doc string inline ie `2d10 + 2d6[crit] + 5` for eg.
@@ -402,19 +403,31 @@ fn fold_ops_val(initial: OpsVal, remainder: Vec<(Oper, OpsVal)>) -> OpsVal {
     })
 }
 
-fn term(input: &str) -> IResult<&str, OpsVal> {
+fn pow(input: &str) -> IResult<&str, OpsVal> {
     let (input, initial)   = ops_val(input)?;
+    let (input, remainder) = many0(
+        map(
+            preceded(tag("^"), ops_val),
+            |i| (Oper::Pow, i)
+        )
+    )(input)?;
+
+    Ok((input, fold_ops_val(initial, remainder)))
+}
+
+fn term(input: &str) -> IResult<&str, OpsVal> {
+    let (input, initial)   = pow(input)?;
     let (input, remainder) = many0(alt((
         map(
-            preceded(tag("*"), ops_val),
+            preceded(tag("*"), pow),
             |i| (Oper::Mul, i)
         ),
         map(
-            preceded(tag("/"), ops_val),
+            preceded(tag("/"), pow),
             |i| (Oper::Div, i)
         ),
         map(
-            preceded(tag("%"), ops_val),
+            preceded(tag("%"), pow),
             |i| (Oper::Mod, i)
         ),
     )))(input)?;
@@ -629,6 +642,56 @@ mod test_parser {
                             Oper::Mul,
                             Box::new(OpsVal::Number(Num::Num(20))),
                             Box::new(OpsVal::Number(Num::Num(30)))
+                        ))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_expr_pow() {
+        // TODO: ordering is wrong, roll20 is 4^(3^2) while this is (4^3)^2
+        // But various languages differs here, some are former some are later
+        assert_eq!(
+            expr("4^3^2"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Pow,
+                        Box::new(OpsVal::Expr(
+                            Oper::Pow,
+                            Box::new(OpsVal::Number(Num::Num(4))),
+                            Box::new(OpsVal::Number(Num::Num(3)))
+                        )),
+                        Box::new(OpsVal::Number(Num::Num(2))),
+            )))
+        );
+    }
+
+    #[test]
+    fn test_expr_pow_mul() {
+        assert_eq!(
+            expr("4^3*2"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Mul,
+                        Box::new(OpsVal::Expr(
+                            Oper::Pow,
+                            Box::new(OpsVal::Number(Num::Num(4))),
+                            Box::new(OpsVal::Number(Num::Num(3)))
+                        )),
+                        Box::new(OpsVal::Number(Num::Num(2))),
+            )))
+        );
+    }
+
+    #[test]
+    fn test_expr_pow_mul_other() {
+        assert_eq!(
+            expr("4*3^2"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Mul,
+                        Box::new(OpsVal::Number(Num::Num(4))),
+                        Box::new(OpsVal::Expr(
+                            Oper::Pow,
+                            Box::new(OpsVal::Number(Num::Num(3))),
+                            Box::new(OpsVal::Number(Num::Num(2)))
                         ))
             )))
         );
