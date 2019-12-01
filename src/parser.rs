@@ -34,6 +34,8 @@ pub fn parse(input: &str) -> IResult<&str, Ast> {
 pub enum Num {
     Num(u32),
     // Can only see the value of the expression, not the computation in the output
+    // TODO: consider/reconsider this and turn it into a `(x)` for eg and have it be computed as we
+    // go, since practically we will be doing a inline pass anyway to pre-compute these value...
     Inline(Box<OpsVal>),
 }
 
@@ -83,6 +85,10 @@ pub enum RollMeta {
     // TODO: Critcal Success + Fumble - only for display purpose
     CriticalSuccess(EqOper, Num),
     CriticalFumble(EqOper, Num),
+
+    // TODO: Display purpose (sort order s/sa and sd for sort ascending and sort descending)
+    // TODO: should only have one sort order, multiples doesn't make sense
+    Sort(SortOrder),
 }
 
 #[derive(Debug, PartialEq)]
@@ -96,6 +102,12 @@ pub enum EqOper {
     Eq,
     Gt,
     Lt,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum SortOrder {
+    Ascending,
+    Descending,
 }
 
 // List of OpsVal::Roll or list of opsval expr whatever
@@ -138,6 +150,7 @@ pub enum OpsVal {
     // 10d5+2 > 3 -> any of the d5+2 that is greater than 3 is then a success for eg...
     // Probably can do 2 terminals (a sum one, or a Target val one) since the evaulation strategy
     // will vary
+    // TODO: can have multiple (ie success == 1, 2, 3 and fail is 4, 5, 6 for eg of d6)
     Target(TargetOper, Num, Box<OpsVal>),
 }
 
@@ -148,6 +161,12 @@ pub enum TargetOper {
     GEq,
     Lt,
     LEq,
+    // TODO: clean these up, should be fail (ie Eq(success/fail, num))
+    FEq,
+    FGt,
+    FGEq,
+    FLt,
+    FLEq,
 }
 
 
@@ -186,7 +205,7 @@ fn dice_oper(input: &str) -> IResult<&str, DiceOper> {
             preceded(tag("="), num),
             |i| DiceOper::Eq(i)
         ),
-        map(num, DiceOper::Eq))
+        map(num, DiceOper::Eq)),
     ))(input)?;
 
     Ok((
@@ -275,6 +294,7 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
             |i| RollMeta::Keep(HiLo::High, i)
         ),
         // Rerolls
+        // TODO: add support for reroll once ie (ro>, ro3, ro=5)
         map(
             preceded(tag("r>"), num),
             |i| RollMeta::Reroll(EqOper::Gt, i)
@@ -324,6 +344,10 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
             preceded(tag("cf="), num),
             |i| RollMeta::CriticalFumble(EqOper::Eq, i)
         ),
+        // Sort ordering
+        map(tag("sa"), |_| RollMeta::Sort(SortOrder::Ascending)),
+        map(tag("sd"), |_| RollMeta::Sort(SortOrder::Descending)),
+        map(tag("s"), |_| RollMeta::Sort(SortOrder::Ascending)),
     ))(input)
 }
 
@@ -467,6 +491,7 @@ fn expr(input: &str) -> IResult<&str, OpsVal> {
 }
 
 // TODO: make the {} delimitation apply more broadly
+// TODO: Implement the match feature (2d6mt?) (its a target outcome)
 fn target(input: &str) -> IResult<&str, OpsVal> {
     let (input, opsval) = alt((
         // TODO: the delimited needs to apply before expr otherwise it becomes GroupRoll first
@@ -498,6 +523,32 @@ fn target(input: &str) -> IResult<&str, OpsVal> {
         map(
             preceded(tag("="), num),
             |i| (TargetOper::Eq, i)
+        ),
+        // TODO: Fail checks, these should only parse if there is a preceding success check
+        // 10d10>3f1
+        map(
+            preceded(tag("f>="), num),
+            |i| (TargetOper::FGEq, i)
+        ),
+        map(
+            preceded(tag("f>"), num),
+            |i| (TargetOper::FGt, i)
+        ),
+        map(
+            preceded(tag("f<="), num),
+            |i| (TargetOper::FLEq, i)
+        ),
+        map(
+            preceded(tag("f<"), num),
+            |i| (TargetOper::FLt, i)
+        ),
+        map(
+            preceded(tag("f="), num),
+            |i| (TargetOper::FEq, i)
+        ),
+        map(
+            preceded(tag("f"), num),
+            |i| (TargetOper::FEq, i)
         )
     )))(input)?;
 
@@ -562,6 +613,22 @@ mod test_parser {
                 vec![
                     RollMeta::CriticalSuccess(EqOper::Eq, Num::Num(10)),
                     RollMeta::CriticalFumble(EqOper::Gt, Num::Num(2)),
+                ]
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_sort() {
+        // TODO: should only have one sort order, multiples doesn't make sense
+        assert_eq!(
+            roll("d10sdsa"),
+            Ok(("", Roll(
+                Num::Num(1),
+                Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                vec![
+                    RollMeta::Sort(SortOrder::Descending),
+                    RollMeta::Sort(SortOrder::Ascending),
                 ]
             )))
         );
@@ -803,6 +870,15 @@ mod test_parser {
             ))))
         );
     }
+
+// TODO: implement support for computed dice (this this is functionally equiv to [[1+2]]d[[3+4]]
+//    #[test]
+//    fn compute_dice() {
+//        assert_eq!(
+//            expr("(1+2)d(3+4)"),
+//            Ok(("", OpsVal::Number(Num::Num(1))))
+//        );
+//    }
 
     #[test]
     fn test_num_number() {
@@ -1130,6 +1206,23 @@ mod test_parser {
                         )
                     ],
                     vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+                )))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_roll_unspecified_roll_meta_fail_eq() {
+        // TODO: this should fail, and should only work for d10=2f=4 for eg
+        assert_eq!(
+            target("d10f=2"),
+            Ok(("", OpsVal::Target(
+                TargetOper::FEq,
+                Num::Num(2),
+                Box::new(OpsVal::Roll(Roll(
+                    Num::Num(1),
+                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                    vec![]
                 )))
             )))
         );
