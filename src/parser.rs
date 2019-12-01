@@ -158,15 +158,11 @@ pub enum OpsVal {
 pub enum TargetOper {
     Eq,
     Gt,
-    GEq,
     Lt,
-    LEq,
     // TODO: clean these up, should be fail (ie Eq(success/fail, num))
     FEq,
     FGt,
-    FGEq,
     FLt,
-    FLEq,
 }
 
 
@@ -505,16 +501,8 @@ fn target(input: &str) -> IResult<&str, OpsVal> {
 
     let (input, ttarget) = opt(alt((
         map(
-            preceded(tag(">="), num),
-            |i| (TargetOper::GEq, i)
-        ),
-        map(
             preceded(tag(">"), num),
             |i| (TargetOper::Gt, i)
-        ),
-        map(
-            preceded(tag("<="), num),
-            |i| (TargetOper::LEq, i)
         ),
         map(
             preceded(tag("<"), num),
@@ -527,16 +515,8 @@ fn target(input: &str) -> IResult<&str, OpsVal> {
         // TODO: Fail checks, these should only parse if there is a preceding success check
         // 10d10>3f1
         map(
-            preceded(tag("f>="), num),
-            |i| (TargetOper::FGEq, i)
-        ),
-        map(
             preceded(tag("f>"), num),
             |i| (TargetOper::FGt, i)
-        ),
-        map(
-            preceded(tag("f<="), num),
-            |i| (TargetOper::FLEq, i)
         ),
         map(
             preceded(tag("f<"), num),
@@ -1052,38 +1032,6 @@ mod test_parser {
             target("d10>2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Gt,
-                Num::Num(2),
-                Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
-                    vec![]
-                )))
-            )))
-        );
-    }
-
-    #[test]
-    fn test_roll_unspecified_roll_meta_leq() {
-        assert_eq!(
-            target("d10<=2"),
-            Ok(("", OpsVal::Target(
-                TargetOper::LEq,
-                Num::Num(2),
-                Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
-                    vec![]
-                )))
-            )))
-        );
-    }
-
-    #[test]
-    fn test_roll_unspecified_roll_meta_geq() {
-        assert_eq!(
-            target("d10>=2"),
-            Ok(("", OpsVal::Target(
-                TargetOper::GEq,
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
