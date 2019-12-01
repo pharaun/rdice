@@ -15,7 +15,10 @@ use nom::{
       preceded,
       delimited,
   },
-  multi::many0,
+  multi::{
+      many0,
+      separated_nonempty_list,
+  },
 };
 
 // TODO: at some point reorganize the AST and remove features i don't care/want to implement.
@@ -95,6 +98,19 @@ pub enum EqOper {
     Lt,
 }
 
+// List of OpsVal::Roll or list of opsval expr whatever
+#[derive(Debug, PartialEq)]
+pub struct GroupRoll(Vec<OpsVal>, Vec<GroupMeta>);
+
+// TODO: maybe instead of having a drop/keep meta on roll we make all roll go into a group and if
+// there's more than 1 it can do special handling? For now -> roll or -> roll -> group.
+#[derive(Debug, PartialEq)]
+pub enum GroupMeta {
+    Drop(HiLo, Num),
+    Keep(HiLo, Num),
+}
+
+
 #[derive(Debug, PartialEq)]
 pub enum Oper {
     Add,
@@ -108,6 +124,7 @@ pub enum Oper {
 #[derive(Debug, PartialEq)]
 pub enum OpsVal {
     Roll(Roll),
+    GroupRoll(GroupRoll),
     Number(Num),
     Expr(Oper, Box<OpsVal>, Box<OpsVal>),
     // TODO: Func call ie.
@@ -322,6 +339,48 @@ fn roll(input: &str) -> IResult<&str, Roll> {
     ))
 }
 
+fn group_meta(input: &str) -> IResult<&str, GroupMeta> {
+    alt((
+        map(
+            preceded(tag("dl"), num),
+            |i| GroupMeta::Drop(HiLo::Low, i)
+        ),
+        // Alias for dl
+        map(
+            preceded(tag("d"), num),
+            |i| GroupMeta::Drop(HiLo::Low, i)
+        ),
+        map(
+            preceded(tag("dh"), num),
+            |i| GroupMeta::Drop(HiLo::High, i)
+        ),
+        map(
+            preceded(tag("kl"), num),
+            |i| GroupMeta::Keep(HiLo::Low, i)
+        ),
+        map(
+            preceded(tag("kh"), num),
+            |i| GroupMeta::Keep(HiLo::High, i)
+        ),
+        // Alias for kh
+        map(
+            preceded(tag("k"), num),
+            |i| GroupMeta::Keep(HiLo::High, i)
+        ),
+    ))(input)
+}
+
+fn group_roll(input: &str) -> IResult<&str, GroupRoll> {
+    let (input, opsvals) = delimited(
+        tag("{"),
+        separated_nonempty_list(tag(","), expr),
+        tag("}")
+    )(input)?;
+    let (input, meta) = many0(group_meta)(input)?;
+
+    Ok((input, GroupRoll(opsvals, meta)))
+}
+
 // equiv to factor (in nom example)
 fn ops_val(input: &str) -> IResult<&str, OpsVal> {
     delimited(
@@ -329,6 +388,7 @@ fn ops_val(input: &str) -> IResult<&str, OpsVal> {
         alt((
             // TODO: parens here?
             map(roll, OpsVal::Roll),
+            map(group_roll, OpsVal::GroupRoll),
             map(num, OpsVal::Number),
         )),
         multispace0
@@ -381,12 +441,13 @@ fn expr(input: &str) -> IResult<&str, OpsVal> {
 // TODO: make the {} delimitation apply more broadly
 fn target(input: &str) -> IResult<&str, OpsVal> {
     let (input, opsval) = alt((
-        expr,
+        // TODO: the delimited needs to apply before expr otherwise it becomes GroupRoll first
         delimited(
             tag("{"),
             expr,
             tag("}"),
         ),
+        expr,
     ))(input)?;
 
     let (input, ttarget) = opt(alt((
@@ -907,6 +968,59 @@ mod test_parser {
                     Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
                     Box::new(OpsVal::Number(Num::Num(1)))
                 ))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_group_roll() {
+        assert_eq!(
+            group_roll("{2d10+2d2}kh2"),
+            Ok(("", GroupRoll(
+                vec![
+                    OpsVal::Expr(
+                        Oper::Add,
+                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                    )
+                ],
+                vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+            )))
+        );
+    }
+
+    #[test]
+    fn test_list_group_roll() {
+        assert_eq!(
+            group_roll("{2d10,2d2}kh2"),
+            Ok(("", GroupRoll(
+                vec![
+                    OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![])),
+                    OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![])),
+                ],
+                vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+            )))
+        );
+    }
+
+    #[test]
+    fn test_list_group_target_roll() {
+        assert_eq!(
+            target("{2d10,2d10+2d2}kh2>3"),
+            Ok(("", OpsVal::Target(
+                TargetOper::Gt,
+                Num::Num(3),
+                Box::new(OpsVal::GroupRoll(GroupRoll(
+                    vec![
+                        OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![])),
+                        OpsVal::Expr(
+                            Oper::Add,
+                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                        )
+                    ],
+                    vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+                )))
             )))
         );
     }
