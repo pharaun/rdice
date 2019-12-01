@@ -396,6 +396,21 @@ fn ops_val(input: &str) -> IResult<&str, OpsVal> {
     )(input)
 }
 
+fn parens(input: &str) -> IResult<&str, OpsVal> {
+    alt((
+        delimited(
+            multispace0,
+            delimited(
+                tag("("),
+                expr,
+                tag(")"),
+            ),
+            multispace0,
+        ),
+        ops_val,
+    ))(input)
+}
+
 fn fold_ops_val(initial: OpsVal, remainder: Vec<(Oper, OpsVal)>) -> OpsVal {
     remainder.into_iter().fold(initial, |acc, pair| {
         let (oper, val) = pair;
@@ -404,10 +419,10 @@ fn fold_ops_val(initial: OpsVal, remainder: Vec<(Oper, OpsVal)>) -> OpsVal {
 }
 
 fn pow(input: &str) -> IResult<&str, OpsVal> {
-    let (input, initial)   = ops_val(input)?;
+    let (input, initial)   = parens(input)?;
     let (input, remainder) = many0(
         map(
-            preceded(tag("^"), ops_val),
+            preceded(tag("^"), parens),
             |i| (Oper::Pow, i)
         )
     )(input)?;
@@ -666,6 +681,22 @@ mod test_parser {
     }
 
     #[test]
+    fn test_expr_pow_paren() {
+        assert_eq!(
+            expr("4^(3^2)"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Pow,
+                        Box::new(OpsVal::Number(Num::Num(4))),
+                        Box::new(OpsVal::Expr(
+                            Oper::Pow,
+                            Box::new(OpsVal::Number(Num::Num(3))),
+                            Box::new(OpsVal::Number(Num::Num(2))),
+                        ))
+            )))
+        );
+    }
+
+    #[test]
     fn test_expr_pow_mul() {
         assert_eq!(
             expr("4^3*2"),
@@ -733,6 +764,22 @@ mod test_parser {
                             Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
                             Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice::Dice(Num::Num(20), DiceMeta::Plain), vec![])))
                         ))
+            )))
+        );
+    }
+
+    #[test]
+    fn test_expr_paren() {
+        assert_eq!(
+            expr(" ( 1 + 2 ) * 3"),
+            Ok(("", OpsVal::Expr(
+                        Oper::Mul,
+                        Box::new(OpsVal::Expr(
+                            Oper::Add,
+                            Box::new(OpsVal::Number(Num::Num(1))),
+                            Box::new(OpsVal::Number(Num::Num(2))),
+                        )),
+                        Box::new(OpsVal::Number(Num::Num(3))),
             )))
         );
     }
