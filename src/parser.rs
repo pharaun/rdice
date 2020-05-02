@@ -63,9 +63,7 @@ pub enum DiceOper {
     // Implicit Eq, to support `d[[2d10]]!` notion (Otherwise it would be stored as
     // d[[2d10]]![[2d10]] and evaulated twice which could diverge)
     IEq,
-    Eq(Num),
-    Gt(Num),
-    Lt(Num),
+    Oper(EqOper, Num),
 }
 
 // TODO: This can probably be folded into the Expr
@@ -191,17 +189,20 @@ fn dice_oper(input: &str) -> IResult<&str, DiceOper> {
     let (input, oper) = opt(alt((
         map(
             preceded(tag(">"), num),
-            |i| DiceOper::Gt(i)
+            |i| DiceOper::Oper(EqOper::Gt, i)
         ),
         map(
             preceded(tag("<"), num),
-            |i| DiceOper::Lt(i)
+            |i| DiceOper::Oper(EqOper::Lt, i)
         ),
         map(
             preceded(tag("="), num),
-            |i| DiceOper::Eq(i)
+            |i| DiceOper::Oper(EqOper::Eq, i)
         ),
-        map(num, DiceOper::Eq)),
+        map(
+            num,
+            |i| DiceOper::Oper(EqOper::Eq, i)
+        )),
     ))(input)?;
 
     Ok((
@@ -902,7 +903,7 @@ mod test_parser {
     fn test_dice_exploding_explicit_eq() {
         assert_eq!(
             dice("d10!10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(10))))))
+            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, Num::Num(10))))))
         );
     }
 
@@ -910,7 +911,7 @@ mod test_parser {
     fn test_dice_exploding_double_explicit_eq() {
         assert_eq!(
             dice("d10!=10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(10))))))
+            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, Num::Num(10))))))
         );
     }
 
@@ -919,7 +920,7 @@ mod test_parser {
     fn test_dice_exploding_gt() {
         assert_eq!(
             dice("d10!>10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Gt(Num::Num(10))))))
+            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Gt, Num::Num(10))))))
         );
     }
 
@@ -927,7 +928,7 @@ mod test_parser {
     fn test_dice_exploding_lt() {
         assert_eq!(
             dice("d10!<10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Lt(Num::Num(10))))))
+            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Lt, Num::Num(10))))))
         );
     }
 
@@ -938,7 +939,7 @@ mod test_parser {
             Ok(("", Dice::Dice(
                 Num::Num(10),
                 DiceMeta::Exploding(
-                    DiceOper::Eq(Num::Inline(Box::new(OpsVal::Number(Num::Num(10)))))
+                    DiceOper::Oper(EqOper::Eq, Num::Inline(Box::new(OpsVal::Number(Num::Num(10)))))
                 )
             )))
         );
@@ -948,7 +949,7 @@ mod test_parser {
     fn test_dice_compounding_lt() {
         assert_eq!(
             dice("d10!!<10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Compounding(DiceOper::Lt(Num::Num(10))))))
+            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Compounding(DiceOper::Oper(EqOper::Lt, Num::Num(10))))))
         );
     }
 
@@ -956,7 +957,7 @@ mod test_parser {
     fn test_dice_penetrating_lt() {
         assert_eq!(
             dice("d10!p<10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Penetrating(DiceOper::Lt(Num::Num(10))))))
+            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Penetrating(DiceOper::Oper(EqOper::Lt, Num::Num(10))))))
         );
     }
 
@@ -1051,7 +1052,7 @@ mod test_parser {
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Eq(Num::Num(3)))),
+                    Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, Num::Num(3)))),
                     vec![RollMeta::Drop(HiLo::Low, Num::Num(1))]
                 )))
             )))
