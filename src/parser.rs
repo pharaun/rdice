@@ -29,15 +29,7 @@ pub fn parse(input: &str) -> IResult<&str, Ast> {
     map(target, Ast)(input)
 }
 
-// We can inline an expr where-ever a number is accepted
-#[derive(Debug, PartialEq)]
-pub enum Num {
-    Num(u32),
-    // Can only see the value of the expression, not the computation in the output
-    // TODO: consider/reconsider this and turn it into a `(x)` for eg and have it be computed as we
-    // go, since practically we will be doing a inline pass anyway to pre-compute these value...
-    Inline(Box<OpsVal>),
-}
+type Num = u32;
 
 // TODO: will make evaul a bit complicated, but each Dice can eval to 1 or more dice roll
 #[derive(Debug, PartialEq)]
@@ -160,7 +152,7 @@ pub enum TargetOper {
 }
 
 
-fn number(input: &str) -> IResult<&str, u32> {
+fn number(input: &str) -> IResult<&str, Num> {
     let radix = 10;
 
     let is_digit = |c: char| c.is_digit(radix);
@@ -170,33 +162,22 @@ fn number(input: &str) -> IResult<&str, u32> {
     map(input)
 }
 
-fn num(input: &str) -> IResult<&str, Num> {
-    alt((
-        map(number, Num::Num),
-        delimited(
-            tag("[["),
-            map(expr, |e| Num::Inline(Box::new(e))),
-            tag("]]")
-        ),
-    ))(input)
-}
-
 fn dice_oper(input: &str) -> IResult<&str, DiceOper> {
     let (input, oper) = opt(alt((
         map(
-            preceded(tag(">"), num),
+            preceded(tag(">"), number),
             |i| DiceOper::Oper(EqOper::Gt, i)
         ),
         map(
-            preceded(tag("<"), num),
+            preceded(tag("<"), number),
             |i| DiceOper::Oper(EqOper::Lt, i)
         ),
         map(
-            preceded(tag("="), num),
+            preceded(tag("="), number),
             |i| DiceOper::Oper(EqOper::Eq, i)
         ),
         map(
-            num,
+            number,
             |i| DiceOper::Oper(EqOper::Eq, i)
         )),
     ))(input)?;
@@ -238,7 +219,7 @@ fn dice_meta(input: &str) -> IResult<&str, DiceMeta> {
 
 fn digit_dice(input: &str) -> IResult<&str, Dice> {
     let (input, _) = tag("d")(input)?;
-    let (input, digit) = num(input)?;
+    let (input, digit) = number(input)?;
     let (input, meta) = dice_meta(input)?;
 
     Ok((input, Dice::Dice(digit, meta)))
@@ -261,80 +242,80 @@ fn dice(input: &str) -> IResult<&str, Dice> {
 fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
     alt((
         map(
-            preceded(tag("dl"), num),
+            preceded(tag("dl"), number),
             |i| RollMeta::Drop(HiLo::Low, i)
         ),
         // Alias for dl
         map(
-            preceded(tag("d"), num),
+            preceded(tag("d"), number),
             |i| RollMeta::Drop(HiLo::Low, i)
         ),
         map(
-            preceded(tag("dh"), num),
+            preceded(tag("dh"), number),
             |i| RollMeta::Drop(HiLo::High, i)
         ),
         map(
-            preceded(tag("kl"), num),
+            preceded(tag("kl"), number),
             |i| RollMeta::Keep(HiLo::Low, i)
         ),
         map(
-            preceded(tag("kh"), num),
+            preceded(tag("kh"), number),
             |i| RollMeta::Keep(HiLo::High, i)
         ),
         // Alias for kh
         map(
-            preceded(tag("k"), num),
+            preceded(tag("k"), number),
             |i| RollMeta::Keep(HiLo::High, i)
         ),
         // Rerolls
         // TODO: add support for reroll once ie (ro>, ro3, ro=5)
         map(
-            preceded(tag("r>"), num),
+            preceded(tag("r>"), number),
             |i| RollMeta::Reroll(EqOper::Gt, i)
         ),
         map(
-            preceded(tag("r<"), num),
+            preceded(tag("r<"), number),
             |i| RollMeta::Reroll(EqOper::Lt, i)
         ),
         map(
-            preceded(tag("r"), num),
+            preceded(tag("r"), number),
             |i| RollMeta::Reroll(EqOper::Eq, i)
         ),
         map(
-            preceded(tag("r="), num),
+            preceded(tag("r="), number),
             |i| RollMeta::Reroll(EqOper::Eq, i)
         ),
         // Critical Success, Critical Fumble
         map(
-            preceded(tag("cs>"), num),
+            preceded(tag("cs>"), number),
             |i| RollMeta::CriticalSuccess(EqOper::Gt, i)
         ),
         map(
-            preceded(tag("cs<"), num),
+            preceded(tag("cs<"), number),
             |i| RollMeta::CriticalSuccess(EqOper::Lt, i)
         ),
         map(
-            preceded(tag("cs"), num),
+            preceded(tag("cs"), number),
             |i| RollMeta::CriticalSuccess(EqOper::Eq, i)
         ),
         map(
-            preceded(tag("cs="), num),
+            preceded(tag("cs="), number),
             |i| RollMeta::CriticalSuccess(EqOper::Eq, i)
         ),
         map(
-            preceded(tag("cf>"), num),
+            preceded(tag("cf>"), number),
             |i| RollMeta::CriticalFumble(EqOper::Gt, i)
         ),
         map(
-            preceded(tag("cf<"), num),
+            preceded(tag("cf<"), number),
             |i| RollMeta::CriticalFumble(EqOper::Lt, i)
         ),
         map(
-            preceded(tag("cf"), num),
+            preceded(tag("cf"), number),
             |i| RollMeta::CriticalFumble(EqOper::Eq, i)
         ),
         map(
-            preceded(tag("cf="), num),
+            preceded(tag("cf="), number),
             |i| RollMeta::CriticalFumble(EqOper::Eq, i)
         ),
         // Sort ordering
@@ -345,13 +326,13 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
 }
 
 fn roll(input: &str) -> IResult<&str, Roll> {
-    let (input, roll) = opt(num)(input)?;
+    let (input, roll) = opt(number)(input)?;
     let (input, dice) = dice(input)?;
     let (input, meta) = many0(roll_meta)(input)?;
 
     Ok((input,
         match roll {
-            None       => Roll(Num::Num(1), dice, meta),
+            None       => Roll(1, dice, meta),
             Some(roll) => Roll(roll, dice, meta),
         }
     ))
@@ -360,29 +341,29 @@ fn roll(input: &str) -> IResult<&str, Roll> {
 fn group_meta(input: &str) -> IResult<&str, GroupMeta> {
     alt((
         map(
-            preceded(tag("dl"), num),
+            preceded(tag("dl"), number),
             |i| GroupMeta::Drop(HiLo::Low, i)
         ),
         // Alias for dl
         map(
-            preceded(tag("d"), num),
+            preceded(tag("d"), number),
             |i| GroupMeta::Drop(HiLo::Low, i)
         ),
         map(
-            preceded(tag("dh"), num),
+            preceded(tag("dh"), number),
             |i| GroupMeta::Drop(HiLo::High, i)
         ),
         map(
-            preceded(tag("kl"), num),
+            preceded(tag("kl"), number),
             |i| GroupMeta::Keep(HiLo::Low, i)
         ),
         map(
-            preceded(tag("kh"), num),
+            preceded(tag("kh"), number),
             |i| GroupMeta::Keep(HiLo::High, i)
         ),
         // Alias for kh
         map(
-            preceded(tag("k"), num),
+            preceded(tag("k"), number),
             |i| GroupMeta::Keep(HiLo::High, i)
         ),
     ))(input)
@@ -407,7 +388,7 @@ fn ops_val(input: &str) -> IResult<&str, OpsVal> {
             // TODO: parens here?
             map(roll, OpsVal::Roll),
             map(group_roll, OpsVal::GroupRoll),
-            map(num, OpsVal::Number),
+            map(number, OpsVal::Number),
         )),
         multispace0
     )(input)
@@ -498,33 +479,33 @@ fn target(input: &str) -> IResult<&str, OpsVal> {
 
     let (input, ttarget) = opt(alt((
         map(
-            preceded(tag(">"), num),
+            preceded(tag(">"), number),
             |i| (TargetOper::Success(EqOper::Gt), i)
         ),
         map(
-            preceded(tag("<"), num),
+            preceded(tag("<"), number),
             |i| (TargetOper::Success(EqOper::Lt), i)
         ),
         map(
-            preceded(tag("="), num),
+            preceded(tag("="), number),
             |i| (TargetOper::Success(EqOper::Eq), i)
         ),
         // TODO: Fail checks, these should only parse if there is a preceding success check
         // 10d10>3f1
         map(
-            preceded(tag("f>"), num),
+            preceded(tag("f>"), number),
             |i| (TargetOper::Fail(EqOper::Gt), i)
         ),
         map(
-            preceded(tag("f<"), num),
+            preceded(tag("f<"), number),
             |i| (TargetOper::Fail(EqOper::Lt), i)
         ),
         map(
-            preceded(tag("f="), num),
+            preceded(tag("f="), number),
             |i| (TargetOper::Fail(EqOper::Eq), i)
         ),
         map(
-            preceded(tag("f"), num),
+            preceded(tag("f"), number),
             |i| (TargetOper::Fail(EqOper::Eq), i)
         )
     )))(input)?;
@@ -552,7 +533,7 @@ mod test_parser {
     fn test_dice() {
         assert_eq!(
             dice("d10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Plain)))
+            Ok(("", Dice::Dice(10, DiceMeta::Plain)))
         );
     }
 
@@ -568,7 +549,7 @@ mod test_parser {
     fn test_roll() {
         assert_eq!(
             roll("5d10"),
-            Ok(("", Roll(Num::Num(5), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![])))
+            Ok(("", Roll(5, Dice::Dice(10, DiceMeta::Plain), vec![])))
         );
     }
 
@@ -576,7 +557,7 @@ mod test_parser {
     fn test_roll_unspecified() {
         assert_eq!(
             roll("d10"),
-            Ok(("", Roll(Num::Num(1), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![])))
+            Ok(("", Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![])))
         );
     }
 
@@ -585,11 +566,11 @@ mod test_parser {
         assert_eq!(
             roll("d10cs10cf>2"),
             Ok(("", Roll(
-                Num::Num(1),
-                Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                1,
+                Dice::Dice(10, DiceMeta::Plain),
                 vec![
-                    RollMeta::CriticalSuccess(EqOper::Eq, Num::Num(10)),
-                    RollMeta::CriticalFumble(EqOper::Gt, Num::Num(2)),
+                    RollMeta::CriticalSuccess(EqOper::Eq, 10),
+                    RollMeta::CriticalFumble(EqOper::Gt, 2),
                 ]
             )))
         );
@@ -601,8 +582,8 @@ mod test_parser {
         assert_eq!(
             roll("d10sdsa"),
             Ok(("", Roll(
-                Num::Num(1),
-                Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                1,
+                Dice::Dice(10, DiceMeta::Plain),
                 vec![
                     RollMeta::Sort(SortOrder::Descending),
                     RollMeta::Sort(SortOrder::Ascending),
@@ -616,11 +597,11 @@ mod test_parser {
         assert_eq!(
             roll("d10r10r>2"),
             Ok(("", Roll(
-                Num::Num(1),
-                Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                1,
+                Dice::Dice(10, DiceMeta::Plain),
                 vec![
-                    RollMeta::Reroll(EqOper::Eq, Num::Num(10)),
-                    RollMeta::Reroll(EqOper::Gt, Num::Num(2)),
+                    RollMeta::Reroll(EqOper::Eq, 10),
+                    RollMeta::Reroll(EqOper::Gt, 2),
                 ]
             )))
         );
@@ -630,7 +611,7 @@ mod test_parser {
     fn test_ops_val_roll() {
         assert_eq!(
             ops_val("10d10"),
-            Ok(("", OpsVal::Roll(Roll(Num::Num(10), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))))
+            Ok(("", OpsVal::Roll(Roll(10, Dice::Dice(10, DiceMeta::Plain), vec![]))))
         );
     }
 
@@ -638,7 +619,7 @@ mod test_parser {
     fn test_ops_val_roll_unspecified() {
         assert_eq!(
             ops_val("d10"),
-            Ok(("", OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))))
+            Ok(("", OpsVal::Roll(Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![]))))
         );
     }
 
@@ -646,7 +627,7 @@ mod test_parser {
     fn test_ops_val_number() {
         assert_eq!(
             ops_val("10"),
-            Ok(("", OpsVal::Number(Num::Num(10))))
+            Ok(("", OpsVal::Number(10)))
         );
     }
 
@@ -656,8 +637,8 @@ mod test_parser {
             term("10*20"),
             Ok(("", OpsVal::Expr(
                         Oper::Mul,
-                        Box::new(OpsVal::Number(Num::Num(10))),
-                        Box::new(OpsVal::Number(Num::Num(20)))
+                        Box::new(OpsVal::Number(10)),
+                        Box::new(OpsVal::Number(20))
             )))
         );
     }
@@ -668,8 +649,8 @@ mod test_parser {
             term("d2/2d3"),
             Ok(("", OpsVal::Expr(
                         Oper::Div,
-                        Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
-                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(3), DiceMeta::Plain), vec![])))
+                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2, DiceMeta::Plain), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(3, DiceMeta::Plain), vec![])))
             )))
         );
     }
@@ -682,10 +663,10 @@ mod test_parser {
                         Oper::Mul,
                         Box::new(OpsVal::Expr(
                             Oper::Mul,
-                            Box::new(OpsVal::Number(Num::Num(10))),
-                            Box::new(OpsVal::Number(Num::Num(20)))
+                            Box::new(OpsVal::Number(10)),
+                            Box::new(OpsVal::Number(20))
                         )),
-                        Box::new(OpsVal::Number(Num::Num(30)))
+                        Box::new(OpsVal::Number(30))
             )))
         );
     }
@@ -696,11 +677,11 @@ mod test_parser {
             expr("10+20*30"),
             Ok(("", OpsVal::Expr(
                         Oper::Add,
-                        Box::new(OpsVal::Number(Num::Num(10))),
+                        Box::new(OpsVal::Number(10)),
                         Box::new(OpsVal::Expr(
                             Oper::Mul,
-                            Box::new(OpsVal::Number(Num::Num(20))),
-                            Box::new(OpsVal::Number(Num::Num(30)))
+                            Box::new(OpsVal::Number(20)),
+                            Box::new(OpsVal::Number(30))
                         ))
             )))
         );
@@ -716,10 +697,10 @@ mod test_parser {
                         Oper::Pow,
                         Box::new(OpsVal::Expr(
                             Oper::Pow,
-                            Box::new(OpsVal::Number(Num::Num(4))),
-                            Box::new(OpsVal::Number(Num::Num(3)))
+                            Box::new(OpsVal::Number(4)),
+                            Box::new(OpsVal::Number(3))
                         )),
-                        Box::new(OpsVal::Number(Num::Num(2))),
+                        Box::new(OpsVal::Number(2)),
             )))
         );
     }
@@ -730,11 +711,11 @@ mod test_parser {
             expr("4^(3^2)"),
             Ok(("", OpsVal::Expr(
                         Oper::Pow,
-                        Box::new(OpsVal::Number(Num::Num(4))),
+                        Box::new(OpsVal::Number(4)),
                         Box::new(OpsVal::Expr(
                             Oper::Pow,
-                            Box::new(OpsVal::Number(Num::Num(3))),
-                            Box::new(OpsVal::Number(Num::Num(2))),
+                            Box::new(OpsVal::Number(3)),
+                            Box::new(OpsVal::Number(2)),
                         ))
             )))
         );
@@ -748,10 +729,10 @@ mod test_parser {
                         Oper::Mul,
                         Box::new(OpsVal::Expr(
                             Oper::Pow,
-                            Box::new(OpsVal::Number(Num::Num(4))),
-                            Box::new(OpsVal::Number(Num::Num(3)))
+                            Box::new(OpsVal::Number(4)),
+                            Box::new(OpsVal::Number(3))
                         )),
-                        Box::new(OpsVal::Number(Num::Num(2))),
+                        Box::new(OpsVal::Number(2)),
             )))
         );
     }
@@ -762,11 +743,11 @@ mod test_parser {
             expr("4*3^2"),
             Ok(("", OpsVal::Expr(
                         Oper::Mul,
-                        Box::new(OpsVal::Number(Num::Num(4))),
+                        Box::new(OpsVal::Number(4)),
                         Box::new(OpsVal::Expr(
                             Oper::Pow,
-                            Box::new(OpsVal::Number(Num::Num(3))),
-                            Box::new(OpsVal::Number(Num::Num(2)))
+                            Box::new(OpsVal::Number(3)),
+                            Box::new(OpsVal::Number(2))
                         ))
             )))
         );
@@ -780,18 +761,18 @@ mod test_parser {
                         Oper::Sub,
                         Box::new(OpsVal::Expr(
                             Oper::Add,
-                            Box::new(OpsVal::Number(Num::Num(10))),
+                            Box::new(OpsVal::Number(10)),
                             Box::new(OpsVal::Expr(
                                 Oper::Div,
                                 Box::new(OpsVal::Expr(
                                     Oper::Mul,
-                                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
-                                    Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice::Dice(Num::Num(3), DiceMeta::Plain), vec![])))
+                                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2, DiceMeta::Plain), vec![]))),
+                                    Box::new(OpsVal::Roll(Roll(10, Dice::Dice(3, DiceMeta::Plain), vec![])))
                                 )),
-                                Box::new(OpsVal::Number(Num::Num(20)))
+                                Box::new(OpsVal::Number(20))
                             ))
                         )),
-                        Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(3), DiceMeta::Plain), vec![])))
+                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(3, DiceMeta::Plain), vec![])))
             )))
         );
     }
@@ -802,11 +783,11 @@ mod test_parser {
             expr("  10 + d2 *  10d20  "),
             Ok(("", OpsVal::Expr(
                         Oper::Add,
-                        Box::new(OpsVal::Number(Num::Num(10))),
+                        Box::new(OpsVal::Number(10)),
                         Box::new(OpsVal::Expr(
                             Oper::Mul,
-                            Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
-                            Box::new(OpsVal::Roll(Roll(Num::Num(10), Dice::Dice(Num::Num(20), DiceMeta::Plain), vec![])))
+                            Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2, DiceMeta::Plain), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(10, Dice::Dice(20, DiceMeta::Plain), vec![])))
                         ))
             )))
         );
@@ -820,31 +801,11 @@ mod test_parser {
                         Oper::Mul,
                         Box::new(OpsVal::Expr(
                             Oper::Add,
-                            Box::new(OpsVal::Number(Num::Num(1))),
-                            Box::new(OpsVal::Number(Num::Num(2))),
+                            Box::new(OpsVal::Number(1)),
+                            Box::new(OpsVal::Number(2)),
                         )),
-                        Box::new(OpsVal::Number(Num::Num(3))),
+                        Box::new(OpsVal::Number(3)),
             )))
-        );
-    }
-
-    #[test]
-    fn test_inline() {
-        assert_eq!(
-            expr("[[d3]]d[[2d4+1]]"),
-            Ok(("", OpsVal::Roll(
-                        Roll(Num::Inline(Box::new(OpsVal::Roll(Roll(
-                            Num::Num(1),
-                            Dice::Dice(Num::Num(3), DiceMeta::Plain),
-                            vec![]
-                        )))),
-                        Dice::Dice(Num::Inline(Box::new(OpsVal::Expr(
-                            Oper::Add,
-                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(4), DiceMeta::Plain), vec![]))),
-                            Box::new(OpsVal::Number(Num::Num(1)))
-                        ))), DiceMeta::Plain),
-                        vec![]
-            ))))
         );
     }
 
@@ -853,45 +814,15 @@ mod test_parser {
 //    fn compute_dice() {
 //        assert_eq!(
 //            expr("(1+2)d(3+4)"),
-//            Ok(("", OpsVal::Number(Num::Num(1))))
+//            Ok(("", OpsVal::Number(1)))
 //        );
 //    }
-
-    #[test]
-    fn test_num_number() {
-        assert_eq!(
-            num("10"),
-            Ok(("", Num::Num(10)))
-        );
-    }
-
-    #[test]
-    fn test_num_inline() {
-        assert_eq!(
-            num("[[10]]"),
-            Ok(("", Num::Inline(Box::new(OpsVal::Number(Num::Num(10))))))
-        );
-    }
-
-    #[test]
-    fn test_num_nested() {
-        assert_eq!(
-            num("[[10 + [[20]]]]"),
-            Ok(("", Num::Inline(Box::new(OpsVal::Expr(
-                                            Oper::Add,
-                                            Box::new(OpsVal::Number(Num::Num(10))),
-                                            Box::new(OpsVal::Number(
-                                                    Num::Inline(Box::new(OpsVal::Number(Num::Num(20))))
-                                            ))
-            )))))
-        );
-    }
 
     #[test]
     fn test_dice_exploding_implicit_eq() {
         assert_eq!(
             dice("d10!"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq))))
+            Ok(("", Dice::Dice(10, DiceMeta::Exploding(DiceOper::IEq))))
         );
     }
 
@@ -899,7 +830,7 @@ mod test_parser {
     fn test_dice_exploding_explicit_eq() {
         assert_eq!(
             dice("d10!10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, Num::Num(10))))))
+            Ok(("", Dice::Dice(10, DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, 10)))))
         );
     }
 
@@ -907,7 +838,7 @@ mod test_parser {
     fn test_dice_exploding_double_explicit_eq() {
         assert_eq!(
             dice("d10!=10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, Num::Num(10))))))
+            Ok(("", Dice::Dice(10, DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, 10)))))
         );
     }
 
@@ -916,7 +847,7 @@ mod test_parser {
     fn test_dice_exploding_gt() {
         assert_eq!(
             dice("d10!>10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Gt, Num::Num(10))))))
+            Ok(("", Dice::Dice(10, DiceMeta::Exploding(DiceOper::Oper(EqOper::Gt, 10)))))
         );
     }
 
@@ -924,20 +855,7 @@ mod test_parser {
     fn test_dice_exploding_lt() {
         assert_eq!(
             dice("d10!<10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Lt, Num::Num(10))))))
-        );
-    }
-
-    #[test]
-    fn test_dice_inline_eq() {
-        assert_eq!(
-            dice("d10![[10]]"),
-            Ok(("", Dice::Dice(
-                Num::Num(10),
-                DiceMeta::Exploding(
-                    DiceOper::Oper(EqOper::Eq, Num::Inline(Box::new(OpsVal::Number(Num::Num(10)))))
-                )
-            )))
+            Ok(("", Dice::Dice(10, DiceMeta::Exploding(DiceOper::Oper(EqOper::Lt, 10)))))
         );
     }
 
@@ -945,7 +863,7 @@ mod test_parser {
     fn test_dice_compounding_lt() {
         assert_eq!(
             dice("d10!!<10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Compounding(DiceOper::Oper(EqOper::Lt, Num::Num(10))))))
+            Ok(("", Dice::Dice(10, DiceMeta::Compounding(DiceOper::Oper(EqOper::Lt, 10)))))
         );
     }
 
@@ -953,7 +871,7 @@ mod test_parser {
     fn test_dice_penetrating_lt() {
         assert_eq!(
             dice("d10!p<10"),
-            Ok(("", Dice::Dice(Num::Num(10), DiceMeta::Penetrating(DiceOper::Oper(EqOper::Lt, Num::Num(10))))))
+            Ok(("", Dice::Dice(10, DiceMeta::Penetrating(DiceOper::Oper(EqOper::Lt, 10)))))
         );
     }
 
@@ -962,13 +880,13 @@ mod test_parser {
         assert_eq!(
             roll("d10dl1dh2d3"),
             Ok(("", Roll(
-                Num::Num(1),
-                Dice::Dice(Num::Num(10),
+                1,
+                Dice::Dice(10,
                 DiceMeta::Plain),
                 vec![
-                    RollMeta::Drop(HiLo::Low, Num::Num(1)),
-                    RollMeta::Drop(HiLo::High, Num::Num(2)),
-                    RollMeta::Drop(HiLo::Low, Num::Num(3)),
+                    RollMeta::Drop(HiLo::Low, 1),
+                    RollMeta::Drop(HiLo::High, 2),
+                    RollMeta::Drop(HiLo::Low, 3),
                 ]
             )))
         );
@@ -979,13 +897,13 @@ mod test_parser {
         assert_eq!(
             roll("d10kl1kh2k3"),
             Ok(("", Roll(
-                Num::Num(1),
-                Dice::Dice(Num::Num(10),
+                1,
+                Dice::Dice(10,
                 DiceMeta::Plain),
                 vec![
-                    RollMeta::Keep(HiLo::Low, Num::Num(1)),
-                    RollMeta::Keep(HiLo::High, Num::Num(2)),
-                    RollMeta::Keep(HiLo::High, Num::Num(3)),
+                    RollMeta::Keep(HiLo::Low, 1),
+                    RollMeta::Keep(HiLo::High, 2),
+                    RollMeta::Keep(HiLo::High, 3),
                 ]
             )))
         );
@@ -997,10 +915,10 @@ mod test_parser {
             target("d10=2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Eq),
-                Num::Num(2),
+                2,
                 Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                    1,
+                    Dice::Dice(10, DiceMeta::Plain),
                     vec![]
                 )))
             )))
@@ -1013,10 +931,10 @@ mod test_parser {
             target("d10<2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Lt),
-                Num::Num(2),
+                2,
                 Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                    1,
+                    Dice::Dice(10, DiceMeta::Plain),
                     vec![]
                 )))
             )))
@@ -1029,10 +947,10 @@ mod test_parser {
             target("d10>2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Gt),
-                Num::Num(2),
+                2,
                 Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                    1,
+                    Dice::Dice(10, DiceMeta::Plain),
                     vec![]
                 )))
             )))
@@ -1045,11 +963,11 @@ mod test_parser {
             target("d10!3d1>2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Gt),
-                Num::Num(2),
+                2,
                 Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, Num::Num(3)))),
-                    vec![RollMeta::Drop(HiLo::Low, Num::Num(1))]
+                    1,
+                    Dice::Dice(10, DiceMeta::Exploding(DiceOper::Oper(EqOper::Eq, 3))),
+                    vec![RollMeta::Drop(HiLo::Low, 1)]
                 )))
             )))
         );
@@ -1061,10 +979,10 @@ mod test_parser {
             target("{d10!}>2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Gt),
-                Num::Num(2),
+                2,
                 Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Exploding(DiceOper::IEq)),
+                    1,
+                    Dice::Dice(10, DiceMeta::Exploding(DiceOper::IEq)),
                     vec![]
                 )))
             )))
@@ -1077,11 +995,11 @@ mod test_parser {
             target("d10+1>3"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Gt),
-                Num::Num(3),
+                3,
                 Box::new(OpsVal::Expr(
                     Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
-                    Box::new(OpsVal::Number(Num::Num(1)))
+                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![]))),
+                    Box::new(OpsVal::Number(1))
                 ))
             )))
         );
@@ -1093,11 +1011,11 @@ mod test_parser {
             target("{d10+1}>3"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Gt),
-                Num::Num(3),
+                3,
                 Box::new(OpsVal::Expr(
                     Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(Num::Num(1), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
-                    Box::new(OpsVal::Number(Num::Num(1)))
+                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![]))),
+                    Box::new(OpsVal::Number(1))
                 ))
             )))
         );
@@ -1111,11 +1029,11 @@ mod test_parser {
                 vec![
                     OpsVal::Expr(
                         Oper::Add,
-                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
-                        Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2, DiceMeta::Plain), vec![]))),
                     )
                 ],
-                vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+                vec![GroupMeta::Keep(HiLo::High, 2)],
             )))
         );
     }
@@ -1126,10 +1044,10 @@ mod test_parser {
             group_roll("{2d10,2d2}kh2"),
             Ok(("", GroupRoll(
                 vec![
-                    OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![])),
-                    OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![])),
+                    OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![])),
+                    OpsVal::Roll(Roll(2, Dice::Dice(2, DiceMeta::Plain), vec![])),
                 ],
-                vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+                vec![GroupMeta::Keep(HiLo::High, 2)],
             )))
         );
     }
@@ -1140,17 +1058,17 @@ mod test_parser {
             target("{2d10,2d10+2d2}kh2>3"),
             Ok(("", OpsVal::Target(
                 TargetOper::Success(EqOper::Gt),
-                Num::Num(3),
+                3,
                 Box::new(OpsVal::GroupRoll(GroupRoll(
                     vec![
-                        OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![])),
+                        OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![])),
                         OpsVal::Expr(
                             Oper::Add,
-                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(10), DiceMeta::Plain), vec![]))),
-                            Box::new(OpsVal::Roll(Roll(Num::Num(2), Dice::Dice(Num::Num(2), DiceMeta::Plain), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2, DiceMeta::Plain), vec![]))),
                         )
                     ],
-                    vec![GroupMeta::Keep(HiLo::High, Num::Num(2))],
+                    vec![GroupMeta::Keep(HiLo::High, 2)],
                 )))
             )))
         );
@@ -1163,10 +1081,10 @@ mod test_parser {
             target("d10f=2"),
             Ok(("", OpsVal::Target(
                 TargetOper::Fail(EqOper::Eq),
-                Num::Num(2),
+                2,
                 Box::new(OpsVal::Roll(Roll(
-                    Num::Num(1),
-                    Dice::Dice(Num::Num(10), DiceMeta::Plain),
+                    1,
+                    Dice::Dice(10, DiceMeta::Plain),
                     vec![]
                 )))
             )))
