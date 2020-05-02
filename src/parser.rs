@@ -81,6 +81,7 @@ pub enum RollMeta {
     Reroll(EqOper, Num),
 
     // TODO: Critcal Success + Fumble - only for display purpose
+    // TODO: have Critical(Type, EqOper, Num) ? Where Type = Success/Fumble (alt Success/Fail)
     CriticalSuccess(EqOper, Num),
     CriticalFumble(EqOper, Num),
 
@@ -154,13 +155,8 @@ pub enum OpsVal {
 
 #[derive(Debug, PartialEq)]
 pub enum TargetOper {
-    Eq,
-    Gt,
-    Lt,
-    // TODO: clean these up, should be fail (ie Eq(success/fail, num))
-    FEq,
-    FGt,
-    FLt,
+    Success(EqOper),
+    Fail(EqOper),
 }
 
 
@@ -503,33 +499,33 @@ fn target(input: &str) -> IResult<&str, OpsVal> {
     let (input, ttarget) = opt(alt((
         map(
             preceded(tag(">"), num),
-            |i| (TargetOper::Gt, i)
+            |i| (TargetOper::Success(EqOper::Gt), i)
         ),
         map(
             preceded(tag("<"), num),
-            |i| (TargetOper::Lt, i)
+            |i| (TargetOper::Success(EqOper::Lt), i)
         ),
         map(
             preceded(tag("="), num),
-            |i| (TargetOper::Eq, i)
+            |i| (TargetOper::Success(EqOper::Eq), i)
         ),
         // TODO: Fail checks, these should only parse if there is a preceding success check
         // 10d10>3f1
         map(
             preceded(tag("f>"), num),
-            |i| (TargetOper::FGt, i)
+            |i| (TargetOper::Fail(EqOper::Gt), i)
         ),
         map(
             preceded(tag("f<"), num),
-            |i| (TargetOper::FLt, i)
+            |i| (TargetOper::Fail(EqOper::Lt), i)
         ),
         map(
             preceded(tag("f="), num),
-            |i| (TargetOper::FEq, i)
+            |i| (TargetOper::Fail(EqOper::Eq), i)
         ),
         map(
             preceded(tag("f"), num),
-            |i| (TargetOper::FEq, i)
+            |i| (TargetOper::Fail(EqOper::Eq), i)
         )
     )))(input)?;
 
@@ -1000,7 +996,7 @@ mod test_parser {
         assert_eq!(
             target("d10=2"),
             Ok(("", OpsVal::Target(
-                TargetOper::Eq,
+                TargetOper::Success(EqOper::Eq),
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
@@ -1016,7 +1012,7 @@ mod test_parser {
         assert_eq!(
             target("d10<2"),
             Ok(("", OpsVal::Target(
-                TargetOper::Lt,
+                TargetOper::Success(EqOper::Lt),
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
@@ -1032,7 +1028,7 @@ mod test_parser {
         assert_eq!(
             target("d10>2"),
             Ok(("", OpsVal::Target(
-                TargetOper::Gt,
+                TargetOper::Success(EqOper::Gt),
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
@@ -1048,7 +1044,7 @@ mod test_parser {
         assert_eq!(
             target("d10!3d1>2"),
             Ok(("", OpsVal::Target(
-                TargetOper::Gt,
+                TargetOper::Success(EqOper::Gt),
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
@@ -1064,7 +1060,7 @@ mod test_parser {
         assert_eq!(
             target("{d10!}>2"),
             Ok(("", OpsVal::Target(
-                TargetOper::Gt,
+                TargetOper::Success(EqOper::Gt),
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
@@ -1080,7 +1076,7 @@ mod test_parser {
         assert_eq!(
             target("d10+1>3"),
             Ok(("", OpsVal::Target(
-                TargetOper::Gt,
+                TargetOper::Success(EqOper::Gt),
                 Num::Num(3),
                 Box::new(OpsVal::Expr(
                     Oper::Add,
@@ -1096,7 +1092,7 @@ mod test_parser {
         assert_eq!(
             target("{d10+1}>3"),
             Ok(("", OpsVal::Target(
-                TargetOper::Gt,
+                TargetOper::Success(EqOper::Gt),
                 Num::Num(3),
                 Box::new(OpsVal::Expr(
                     Oper::Add,
@@ -1143,7 +1139,7 @@ mod test_parser {
         assert_eq!(
             target("{2d10,2d10+2d2}kh2>3"),
             Ok(("", OpsVal::Target(
-                TargetOper::Gt,
+                TargetOper::Success(EqOper::Gt),
                 Num::Num(3),
                 Box::new(OpsVal::GroupRoll(GroupRoll(
                     vec![
@@ -1166,7 +1162,7 @@ mod test_parser {
         assert_eq!(
             target("d10f=2"),
             Ok(("", OpsVal::Target(
-                TargetOper::FEq,
+                TargetOper::Fail(EqOper::Eq),
                 Num::Num(2),
                 Box::new(OpsVal::Roll(Roll(
                     Num::Num(1),
