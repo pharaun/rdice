@@ -33,16 +33,32 @@ type Num = u32;
 
 #[derive(Debug, PartialEq)]
 pub enum ComparePoint {
-    // Default Behavor (when there's no Compare Point)
+    // Default Behavor (when there's no Compare Point) (Rename to Default?)
     IEq,
     Eq(Num),
     Gt(Num),
     Lt(Num),
 }
 
-// TODO: will make evaul a bit complicated, but each Dice can eval to 1 or more dice roll
+// TODO: computed dice (N+Y)dX/Nd(X+Y) (basic + fate)
 #[derive(Debug, PartialEq)]
 pub enum Dice {
+    Dice(Num),
+
+    // TODO: not all operation works on fate dice, might be worth seeing if i can't make it so that
+    // we can't get those invalid operation in via types, if not, runtime checks are ok too
+    Fate,
+}
+
+// TODO: This can probably be folded into the Expr
+// TODO: RollMeta -> Vec, because can have multiple effects on a roll pool (ie keep, drop, ...)
+// TODO: computed dice (N+Y)dX/Nd(X+Y) (basic + fate)
+#[derive(Debug, PartialEq)]
+pub struct Roll(Num, Dice, Vec<RollMeta>);
+
+// TODO: have two type of meta, one for fate and one for regular dice rolls (if needed)
+#[derive(Debug, PartialEq)]
+pub enum RollMeta {
     // Display only:
     // * Matching?
     // * Sorting
@@ -54,34 +70,13 @@ pub enum Dice {
     // * Penetrating
     // * Keep/Drop (Hi, Lo)
     // * Reroll (Std, Only Once)
-    Dice(Num, DiceMeta),
+    Drop(HiLo, Num),
+    Keep(HiLo, Num),
 
-    // TODO: not all operation works on fate dice, might be worth seeing if i can't make it so that
-    // we can't get those invalid operation in via types, if not, runtime checks are ok too
-    Fate(DiceMeta),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum DiceMeta {
-    Plain,
+    Reroll(ComparePoint),
     Exploding(ComparePoint),
     Compounding(ComparePoint),
     Penetrating(ComparePoint),
-}
-
-// TODO: This can probably be folded into the Expr
-// TODO: Consider breaking this into the full roll and 'limited' roll for inside inline expressions
-// TODO: RollMeta -> Vec, because can have multiple effects on a roll pool (ie keep, drop, ...)
-#[derive(Debug, PartialEq)]
-pub struct Roll(Num, Dice, Vec<RollMeta>);
-
-// TODO: not sure we want to allow anything other than plain outcome for a RollMeta inside an
-// Inline Expression
-#[derive(Debug, PartialEq)]
-pub enum RollMeta {
-    Drop(HiLo, Num),
-    Keep(HiLo, Num),
-    Reroll(ComparePoint),
 
     // TODO: Critcal Success + Fumble - only for display purpose
     // TODO: have Critical(Type, ComparePoint) ? Where Type = Success/Fumble (alt Success/Fail)
@@ -106,6 +101,7 @@ pub enum SortOrder {
 }
 
 // List of OpsVal::Roll or list of opsval expr whatever
+// TODO: have this be a collection of Rolls (possibly a restricted RollMeta for inside a group)
 #[derive(Debug, PartialEq)]
 pub struct GroupRoll(Vec<OpsVal>, Vec<GroupMeta>);
 
@@ -135,9 +131,6 @@ pub enum OpsVal {
     GroupRoll(GroupRoll),
     Number(Num),
     Expr(Oper, Box<OpsVal>, Box<OpsVal>),
-    // TODO: Func call ie.
-    // Func(&str (name), Box<OpsVal>),
-    // for - floor/ceiling/abs/round (question tho of floating value calculation....)
 
     // TODO: i think this is an terminal value, so it should be in its own type but let's put it
     // here for now.
@@ -166,7 +159,8 @@ fn number(input: &str) -> IResult<&str, Num> {
     map(input)
 }
 
-fn dice_oper(input: &str) -> IResult<&str, ComparePoint> {
+// TODO: have a final fallback option? in the alt for IEq?
+fn compare_point(input: &str) -> IResult<&str, ComparePoint> {
     let (input, oper) = opt(alt((
         map(
             preceded(tag(">"), number),
@@ -195,45 +189,17 @@ fn dice_oper(input: &str) -> IResult<&str, ComparePoint> {
     ))
 }
 
-fn dice_meta(input: &str) -> IResult<&str, DiceMeta> {
-    let (input, meta) = opt(alt((
-        map(
-            preceded(tag("!!"), dice_oper),
-            |i| DiceMeta::Compounding(i)
-        ),
-        map(
-            preceded(tag("!p"), dice_oper),
-            |i| DiceMeta::Penetrating(i)
-        ),
-        map(
-            preceded(tag("!"), dice_oper),
-            |i| DiceMeta::Exploding(i)
-        ),
-    )))(input)?;
-
-    // TODO: find a good way to handle 'fallback' values
-    Ok((
-        input,
-        match meta {
-            None    => DiceMeta::Plain,
-            Some(x) => x,
-        }
-    ))
-}
-
 fn digit_dice(input: &str) -> IResult<&str, Dice> {
     let (input, _) = tag("d")(input)?;
     let (input, digit) = number(input)?;
-    let (input, meta) = dice_meta(input)?;
 
-    Ok((input, Dice::Dice(digit, meta)))
+    Ok((input, Dice::Dice(digit)))
 }
 
 fn fate_dice(input: &str) -> IResult<&str, Dice> {
     let (input, _) = tag("dF")(input)?;
-    let (input, meta) = dice_meta(input)?;
 
-    Ok((input, Dice::Fate(meta)))
+    Ok((input, Dice::Fate))
 }
 
 fn dice(input: &str) -> IResult<&str, Dice> {
@@ -243,85 +209,50 @@ fn dice(input: &str) -> IResult<&str, Dice> {
     ))(input)
 }
 
+fn drop_meta(input: &str) -> IResult<&str, RollMeta> {
+    let (input, _) = tag("d")(input)?;
+
+    alt((
+        map(preceded(tag("l"), number), |i| RollMeta::Drop(HiLo::Low, i)),
+        map(preceded(tag("h"), number), |i| RollMeta::Drop(HiLo::High, i)),
+        // Alias for dl
+        map(number, |i| RollMeta::Drop(HiLo::Low, i)),
+    ))(input)
+}
+
+fn keep_meta(input: &str) -> IResult<&str, RollMeta> {
+    let (input, _) = tag("k")(input)?;
+
+    alt((
+        map(preceded(tag("l"), number), |i| RollMeta::Keep(HiLo::Low, i)),
+        map(preceded(tag("h"), number), |i| RollMeta::Keep(HiLo::High, i)),
+        // Alias for kh
+        map(number, |i| RollMeta::Keep(HiLo::High, i)),
+    ))(input)
+}
+
 fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
     alt((
-        map(
-            preceded(tag("dl"), number),
-            |i| RollMeta::Drop(HiLo::Low, i)
-        ),
-        // Alias for dl
-        map(
-            preceded(tag("d"), number),
-            |i| RollMeta::Drop(HiLo::Low, i)
-        ),
-        map(
-            preceded(tag("dh"), number),
-            |i| RollMeta::Drop(HiLo::High, i)
-        ),
-        map(
-            preceded(tag("kl"), number),
-            |i| RollMeta::Keep(HiLo::Low, i)
-        ),
-        map(
-            preceded(tag("kh"), number),
-            |i| RollMeta::Keep(HiLo::High, i)
-        ),
-        // Alias for kh
-        map(
-            preceded(tag("k"), number),
-            |i| RollMeta::Keep(HiLo::High, i)
-        ),
+        drop_meta,
+        keep_meta,
+
         // Rerolls
         // TODO: add support for reroll once ie (ro>, ro3, ro=5)
-        map(
-            preceded(tag("r>"), number),
-            |i| RollMeta::Reroll(ComparePoint::Gt(i))
-        ),
-        map(
-            preceded(tag("r<"), number),
-            |i| RollMeta::Reroll(ComparePoint::Lt(i))
-        ),
-        map(
-            preceded(tag("r"), number),
-            |i| RollMeta::Reroll(ComparePoint::Eq(i))
-        ),
-        map(
-            preceded(tag("r="), number),
-            |i| RollMeta::Reroll(ComparePoint::Eq(i))
-        ),
+        map(preceded(tag("r"), compare_point), |i| RollMeta::Reroll(i)),
+
+        // Compounding
+        map(preceded(tag("!!"), compare_point), |i| RollMeta::Compounding(i)),
+
+        // Penetrating
+        map(preceded(tag("!p"), compare_point), |i| RollMeta::Penetrating(i)),
+
+        // Exploding
+        map(preceded(tag("!"), compare_point), |i| RollMeta::Exploding(i)),
+
         // Critical Success, Critical Fumble
-        map(
-            preceded(tag("cs>"), number),
-            |i| RollMeta::CriticalSuccess(ComparePoint::Gt(i))
-        ),
-        map(
-            preceded(tag("cs<"), number),
-            |i| RollMeta::CriticalSuccess(ComparePoint::Lt(i))
-        ),
-        map(
-            preceded(tag("cs"), number),
-            |i| RollMeta::CriticalSuccess(ComparePoint::Eq(i))
-        ),
-        map(
-            preceded(tag("cs="), number),
-            |i| RollMeta::CriticalSuccess(ComparePoint::Eq(i))
-        ),
-        map(
-            preceded(tag("cf>"), number),
-            |i| RollMeta::CriticalFumble(ComparePoint::Gt(i))
-        ),
-        map(
-            preceded(tag("cf<"), number),
-            |i| RollMeta::CriticalFumble(ComparePoint::Lt(i))
-        ),
-        map(
-            preceded(tag("cf"), number),
-            |i| RollMeta::CriticalFumble(ComparePoint::Eq(i))
-        ),
-        map(
-            preceded(tag("cf="), number),
-            |i| RollMeta::CriticalFumble(ComparePoint::Eq(i))
-        ),
+        map(preceded(tag("cs"), compare_point), |i| RollMeta::CriticalSuccess(i)),
+        map(preceded(tag("cf"), compare_point), |i| RollMeta::CriticalFumble(i)),
+
         // Sort ordering
         map(tag("sa"), |_| RollMeta::Sort(SortOrder::Ascending)),
         map(tag("sd"), |_| RollMeta::Sort(SortOrder::Descending)),
@@ -537,7 +468,7 @@ mod test_parser {
     fn test_dice() {
         assert_eq!(
             dice("d10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Plain)))
+            Ok(("", Dice::Dice(10)))
         );
     }
 
@@ -545,7 +476,7 @@ mod test_parser {
     fn test_fate() {
         assert_eq!(
             dice("dF"),
-            Ok(("", Dice::Fate(DiceMeta::Plain)))
+            Ok(("", Dice::Fate))
         );
     }
 
@@ -553,7 +484,7 @@ mod test_parser {
     fn test_roll() {
         assert_eq!(
             roll("5d10"),
-            Ok(("", Roll(5, Dice::Dice(10, DiceMeta::Plain), vec![])))
+            Ok(("", Roll(5, Dice::Dice(10), vec![])))
         );
     }
 
@@ -561,7 +492,7 @@ mod test_parser {
     fn test_roll_unspecified() {
         assert_eq!(
             roll("d10"),
-            Ok(("", Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![])))
+            Ok(("", Roll(1, Dice::Dice(10), vec![])))
         );
     }
 
@@ -571,7 +502,7 @@ mod test_parser {
             roll("d10cs10cf>2"),
             Ok(("", Roll(
                 1,
-                Dice::Dice(10, DiceMeta::Plain),
+                Dice::Dice(10),
                 vec![
                     RollMeta::CriticalSuccess(ComparePoint::Eq(10)),
                     RollMeta::CriticalFumble(ComparePoint::Gt(2)),
@@ -587,7 +518,7 @@ mod test_parser {
             roll("d10sdsa"),
             Ok(("", Roll(
                 1,
-                Dice::Dice(10, DiceMeta::Plain),
+                Dice::Dice(10),
                 vec![
                     RollMeta::Sort(SortOrder::Descending),
                     RollMeta::Sort(SortOrder::Ascending),
@@ -602,7 +533,7 @@ mod test_parser {
             roll("d10r10r>2"),
             Ok(("", Roll(
                 1,
-                Dice::Dice(10, DiceMeta::Plain),
+                Dice::Dice(10),
                 vec![
                     RollMeta::Reroll(ComparePoint::Eq(10)),
                     RollMeta::Reroll(ComparePoint::Gt(2)),
@@ -615,7 +546,7 @@ mod test_parser {
     fn test_ops_val_roll() {
         assert_eq!(
             ops_val("10d10"),
-            Ok(("", OpsVal::Roll(Roll(10, Dice::Dice(10, DiceMeta::Plain), vec![]))))
+            Ok(("", OpsVal::Roll(Roll(10, Dice::Dice(10), vec![]))))
         );
     }
 
@@ -623,7 +554,7 @@ mod test_parser {
     fn test_ops_val_roll_unspecified() {
         assert_eq!(
             ops_val("d10"),
-            Ok(("", OpsVal::Roll(Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![]))))
+            Ok(("", OpsVal::Roll(Roll(1, Dice::Dice(10), vec![]))))
         );
     }
 
@@ -653,8 +584,8 @@ mod test_parser {
             term("d2/2d3"),
             Ok(("", OpsVal::Expr(
                         Oper::Div,
-                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2, DiceMeta::Plain), vec![]))),
-                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(3, DiceMeta::Plain), vec![])))
+                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(3), vec![])))
             )))
         );
     }
@@ -770,13 +701,13 @@ mod test_parser {
                                 Oper::Div,
                                 Box::new(OpsVal::Expr(
                                     Oper::Mul,
-                                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2, DiceMeta::Plain), vec![]))),
-                                    Box::new(OpsVal::Roll(Roll(10, Dice::Dice(3, DiceMeta::Plain), vec![])))
+                                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2), vec![]))),
+                                    Box::new(OpsVal::Roll(Roll(10, Dice::Dice(3), vec![])))
                                 )),
                                 Box::new(OpsVal::Number(20))
                             ))
                         )),
-                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(3, DiceMeta::Plain), vec![])))
+                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(3), vec![])))
             )))
         );
     }
@@ -790,8 +721,8 @@ mod test_parser {
                         Box::new(OpsVal::Number(10)),
                         Box::new(OpsVal::Expr(
                             Oper::Mul,
-                            Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2, DiceMeta::Plain), vec![]))),
-                            Box::new(OpsVal::Roll(Roll(10, Dice::Dice(20, DiceMeta::Plain), vec![])))
+                            Box::new(OpsVal::Roll(Roll(1, Dice::Dice(2), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(10, Dice::Dice(20), vec![])))
                         ))
             )))
         );
@@ -825,24 +756,42 @@ mod test_parser {
     #[test]
     fn test_dice_exploding_implicit_eq() {
         assert_eq!(
-            dice("d10!"),
-            Ok(("", Dice::Dice(10, DiceMeta::Exploding(ComparePoint::IEq))))
+            roll("d10!"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Exploding(ComparePoint::IEq)
+                ]
+            )))
         );
     }
 
     #[test]
     fn test_dice_exploding_explicit_eq() {
         assert_eq!(
-            dice("d10!10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Exploding(ComparePoint::Eq(10)))))
+            roll("d10!10"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Exploding(ComparePoint::Eq(10))
+                ]
+            )))
         );
     }
 
     #[test]
     fn test_dice_exploding_double_explicit_eq() {
         assert_eq!(
-            dice("d10!=10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Exploding(ComparePoint::Eq(10)))))
+            roll("d10!=10"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Exploding(ComparePoint::Eq(10))
+                ]
+            )))
         );
     }
 
@@ -850,32 +799,56 @@ mod test_parser {
     #[test]
     fn test_dice_exploding_gt() {
         assert_eq!(
-            dice("d10!>10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Exploding(ComparePoint::Gt(10)))))
+            roll("d10!>10"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Exploding(ComparePoint::Gt(10))
+                ]
+            )))
         );
     }
 
     #[test]
     fn test_dice_exploding_lt() {
         assert_eq!(
-            dice("d10!<10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Exploding(ComparePoint::Lt(10)))))
+            roll("d10!<10"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Exploding(ComparePoint::Lt(10))
+                ]
+            )))
         );
     }
 
     #[test]
     fn test_dice_compounding_lt() {
         assert_eq!(
-            dice("d10!!<10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Compounding(ComparePoint::Lt(10)))))
+            roll("d10!!<10"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Compounding(ComparePoint::Lt(10))
+                ]
+            )))
         );
     }
 
     #[test]
     fn test_dice_penetrating_lt() {
         assert_eq!(
-            dice("d10!p<10"),
-            Ok(("", Dice::Dice(10, DiceMeta::Penetrating(ComparePoint::Lt(10)))))
+            roll("d10!p<10"),
+            Ok(("", Roll(
+                1,
+                Dice::Dice(10),
+                vec![
+                    RollMeta::Penetrating(ComparePoint::Lt(10))
+                ]
+            )))
         );
     }
 
@@ -885,8 +858,7 @@ mod test_parser {
             roll("d10dl1dh2d3"),
             Ok(("", Roll(
                 1,
-                Dice::Dice(10,
-                DiceMeta::Plain),
+                Dice::Dice(10),
                 vec![
                     RollMeta::Drop(HiLo::Low, 1),
                     RollMeta::Drop(HiLo::High, 2),
@@ -902,8 +874,7 @@ mod test_parser {
             roll("d10kl1kh2k3"),
             Ok(("", Roll(
                 1,
-                Dice::Dice(10,
-                DiceMeta::Plain),
+                Dice::Dice(10),
                 vec![
                     RollMeta::Keep(HiLo::Low, 1),
                     RollMeta::Keep(HiLo::High, 2),
@@ -921,7 +892,7 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Eq(2)),
                 Box::new(OpsVal::Roll(Roll(
                     1,
-                    Dice::Dice(10, DiceMeta::Plain),
+                    Dice::Dice(10),
                     vec![]
                 )))
             )))
@@ -936,7 +907,7 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Lt(2)),
                 Box::new(OpsVal::Roll(Roll(
                     1,
-                    Dice::Dice(10, DiceMeta::Plain),
+                    Dice::Dice(10),
                     vec![]
                 )))
             )))
@@ -951,7 +922,7 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Gt(2)),
                 Box::new(OpsVal::Roll(Roll(
                     1,
-                    Dice::Dice(10, DiceMeta::Plain),
+                    Dice::Dice(10),
                     vec![]
                 )))
             )))
@@ -966,8 +937,11 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Gt(2)),
                 Box::new(OpsVal::Roll(Roll(
                     1,
-                    Dice::Dice(10, DiceMeta::Exploding(ComparePoint::Eq(3))),
-                    vec![RollMeta::Drop(HiLo::Low, 1)]
+                    Dice::Dice(10),
+                    vec![
+                        RollMeta::Exploding(ComparePoint::Eq(3)),
+                        RollMeta::Drop(HiLo::Low, 1),
+                    ]
                 )))
             )))
         );
@@ -981,8 +955,10 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Gt(2)),
                 Box::new(OpsVal::Roll(Roll(
                     1,
-                    Dice::Dice(10, DiceMeta::Exploding(ComparePoint::IEq)),
-                    vec![]
+                    Dice::Dice(10),
+                    vec![
+                        RollMeta::Exploding(ComparePoint::IEq),
+                    ]
                 )))
             )))
         );
@@ -996,7 +972,7 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Gt(3)),
                 Box::new(OpsVal::Expr(
                     Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![]))),
+                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10), vec![]))),
                     Box::new(OpsVal::Number(1))
                 ))
             )))
@@ -1011,7 +987,7 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Gt(3)),
                 Box::new(OpsVal::Expr(
                     Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10, DiceMeta::Plain), vec![]))),
+                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10), vec![]))),
                     Box::new(OpsVal::Number(1))
                 ))
             )))
@@ -1026,8 +1002,8 @@ mod test_parser {
                 vec![
                     OpsVal::Expr(
                         Oper::Add,
-                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![]))),
-                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2, DiceMeta::Plain), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2), vec![]))),
                     )
                 ],
                 vec![GroupMeta::Keep(HiLo::High, 2)],
@@ -1041,8 +1017,8 @@ mod test_parser {
             group_roll("{2d10,2d2}kh2"),
             Ok(("", GroupRoll(
                 vec![
-                    OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![])),
-                    OpsVal::Roll(Roll(2, Dice::Dice(2, DiceMeta::Plain), vec![])),
+                    OpsVal::Roll(Roll(2, Dice::Dice(10), vec![])),
+                    OpsVal::Roll(Roll(2, Dice::Dice(2), vec![])),
                 ],
                 vec![GroupMeta::Keep(HiLo::High, 2)],
             )))
@@ -1057,11 +1033,11 @@ mod test_parser {
                 TargetOper::Success(ComparePoint::Gt(3)),
                 Box::new(OpsVal::GroupRoll(GroupRoll(
                     vec![
-                        OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![])),
+                        OpsVal::Roll(Roll(2, Dice::Dice(10), vec![])),
                         OpsVal::Expr(
                             Oper::Add,
-                            Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10, DiceMeta::Plain), vec![]))),
-                            Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2, DiceMeta::Plain), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10), vec![]))),
+                            Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2), vec![]))),
                         )
                     ],
                     vec![GroupMeta::Keep(HiLo::High, 2)],
@@ -1079,7 +1055,7 @@ mod test_parser {
                 TargetOper::Fail(ComparePoint::Eq(2)),
                 Box::new(OpsVal::Roll(Roll(
                     1,
-                    Dice::Dice(10, DiceMeta::Plain),
+                    Dice::Dice(10),
                     vec![]
                 )))
             )))
