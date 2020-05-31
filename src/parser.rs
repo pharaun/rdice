@@ -21,24 +21,11 @@ use nom::{
   },
 };
 
-// TODO: at some point reorganize the AST and remove features i don't care/want to implement.
-#[derive(Debug, PartialEq)]
-pub struct Ast(OpsVal);
-
-pub fn parse(input: &str) -> IResult<&str, Ast> {
-    map(target, Ast)(input)
+pub fn parse(input: &str) -> IResult<&str, OpsVal> {
+    expr(input)
 }
 
 type Num = u32;
-
-#[derive(Debug, PartialEq)]
-pub enum ComparePoint {
-    // Default Behavor (when there's no Compare Point) (Rename to Default?)
-    IEq,
-    Eq(Num),
-    Gt(Num),
-    Lt(Num),
-}
 
 // TODO: computed dice (N+Y)dX/Nd(X+Y) (basic + fate)
 #[derive(Debug, PartialEq)]
@@ -59,28 +46,49 @@ pub struct Roll(Num, Dice, Vec<RollMeta>);
 // TODO: have two type of meta, one for fate and one for regular dice rolls (if needed)
 #[derive(Debug, PartialEq)]
 pub enum RollMeta {
-    // Display only:
-    // * Matching?
+    // * Matching
+    Matching(Matching, ComparePoint),
+
     // * Sorting
-    //
-    // Supports:
-    // * Target (success, fail)
-    // * Exploding
-    // * Compounding
-    // * Penetrating
-    // * Keep/Drop (Hi, Lo)
-    // * Reroll (Std, Only Once)
-    Drop(HiLo, Num),
-    Keep(HiLo, Num),
-
-    Reroll(ComparePoint),
-    Exploding(ComparePoint),
-    Compounding(ComparePoint),
-    Penetrating(ComparePoint),
-
     // TODO: Display purpose (sort order s/sa and sd for sort ascending and sort descending)
     // TODO: should only have one sort order, multiples doesn't make sense
     Sort(SortOrder),
+
+    // * Target (success, fail)
+    Target(Critical, ComparePoint),
+
+    // * Exploding (Std, Compounding, Penetrating)
+    Exploding(Exploding, ComparePoint),
+
+    // * Keep/Drop (Hi, Lo)
+    // NOTE: can't replace with group, there's subtle details in difference in behavor here
+    Drop(HiLo, Num),
+    Keep(HiLo, Num),
+
+    // * Reroll (Std, Only Once)
+    Reroll(Reroll, ComparePoint),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ComparePoint {
+    // Default Behavor (when there's no Compare Point) (Rename to Default?)
+    IEq,
+    Eq(Num),
+    Gt(Num),
+    Lt(Num),
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Exploding {
+    Exploding,
+    Compounding,
+    Penetrating,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Reroll {
+    Everytime,
+    Once,
 }
 
 #[derive(Debug, PartialEq)]
@@ -95,6 +103,18 @@ pub enum SortOrder {
     Descending,
 }
 
+#[derive(Debug, PartialEq)]
+pub enum Critical {
+    Success,
+    Fail,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum Matching {
+    Matching,
+    Target,
+}
+
 // List of OpsVal::Roll or list of opsval expr whatever
 // TODO: have this be a collection of Rolls (possibly a restricted RollMeta for inside a group)
 #[derive(Debug, PartialEq)]
@@ -104,8 +124,13 @@ pub struct GroupRoll(Vec<OpsVal>, Vec<GroupMeta>);
 // there's more than 1 it can do special handling? For now -> roll or -> roll -> group.
 #[derive(Debug, PartialEq)]
 pub enum GroupMeta {
+    // * Keep/Drop (Hi, Lo)
+    // NOTE: can't replace with Roll, there's subtle details in difference in behavor here
     Drop(HiLo, Num),
     Keep(HiLo, Num),
+
+    // * Target (success, fail)
+    Target(Critical, ComparePoint),
 }
 
 
@@ -126,21 +151,6 @@ pub enum OpsVal {
     GroupRoll(GroupRoll),
     Number(Num),
     Expr(Oper, Box<OpsVal>, Box<OpsVal>),
-
-    // TODO: i think this is an terminal value, so it should be in its own type but let's put it
-    // here for now.
-    // TODO: this may need further work, since ie it would need to eval each dice roll 1 by 1 ie
-    // 10d5+2 > 3 -> any of the d5+2 that is greater than 3 is then a success for eg...
-    // Probably can do 2 terminals (a sum one, or a Target val one) since the evaulation strategy
-    // will vary
-    // TODO: can have multiple (ie success == 1, 2, 3 and fail is 4, 5, 6 for eg of d6)
-    Target(Vec<Critical>, Box<OpsVal>),
-}
-
-#[derive(Debug, PartialEq)]
-pub enum Critical {
-    Success(ComparePoint),
-    Fail(ComparePoint),
 }
 
 
@@ -232,17 +242,25 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
         map(keep_meta, |(h, i)| RollMeta::Keep(h, i)),
 
         // Rerolls
-        // TODO: add support for reroll once ie (ro>, ro3, ro=5)
-        map(preceded(tag("r"), compare_point), |i| RollMeta::Reroll(i)),
+        map(preceded(tag("ro"), compare_point), |i| RollMeta::Reroll(Reroll::Everytime, i)),
+        map(preceded(tag("r"), compare_point), |i| RollMeta::Reroll(Reroll::Once, i)),
 
         // Compounding
-        map(preceded(tag("!!"), compare_point), |i| RollMeta::Compounding(i)),
+        map(preceded(tag("!!"), compare_point), |i| RollMeta::Exploding(Exploding::Compounding, i)),
 
         // Penetrating
-        map(preceded(tag("!p"), compare_point), |i| RollMeta::Penetrating(i)),
+        map(preceded(tag("!p"), compare_point), |i| RollMeta::Exploding(Exploding::Penetrating, i)),
 
         // Exploding
-        map(preceded(tag("!"), compare_point), |i| RollMeta::Exploding(i)),
+        map(preceded(tag("!"), compare_point), |i| RollMeta::Exploding(Exploding::Exploding, i)),
+
+        // Matching
+        map(preceded(tag("mt"), compare_point), |i| RollMeta::Matching(Matching::Target, i)),
+        map(preceded(tag("m"), compare_point), |i| RollMeta::Matching(Matching::Matching, i)),
+
+        // Critical
+        map(preceded(tag("f"), compare_point), |i| RollMeta::Target(Critical::Fail, i)),
+        map(compare_point, |i| RollMeta::Target(Critical::Success, i)),
 
         // Sort ordering
         map(tag("sa"), |_| RollMeta::Sort(SortOrder::Ascending)),
@@ -268,6 +286,10 @@ fn group_meta(input: &str) -> IResult<&str, GroupMeta> {
     alt((
         map(drop_meta, |(h, i)| GroupMeta::Drop(h, i)),
         map(keep_meta, |(h, i)| GroupMeta::Keep(h, i)),
+
+        // Critical
+        map(preceded(tag("f"), compare_point), |i| GroupMeta::Target(Critical::Fail, i)),
+        map(compare_point, |i| GroupMeta::Target(Critical::Success, i)),
     ))(input)
 }
 
@@ -364,31 +386,6 @@ fn expr(input: &str) -> IResult<&str, OpsVal> {
     )))(input)?;
 
     Ok((input, fold_ops_val(initial, remainder)))
-}
-
-// TODO: make the {} delimitation apply more broadly
-// TODO: Implement the match feature (2d6mt?) (its a target outcome)
-fn target(input: &str) -> IResult<&str, OpsVal> {
-    let (input, opsval) = alt((
-        // TODO: the delimited needs to apply before expr otherwise it becomes GroupRoll first
-        delimited(
-            tag("{"),
-            expr,
-            tag("}"),
-        ),
-        expr,
-    ))(input)?;
-
-    let (input, ttarget) = opt(alt((
-        // TODO: Fail checks, these should only parse if there is a preceding success check 10d10>3f1
-        map(preceded(tag("f"), compare_point), |i| Critical::Fail(i)),
-        map(compare_point, |i| Critical::Success(i)),
-    )))(input)?;
-
-    Ok((input, match ttarget {
-        None     => opsval,
-        Some(cs) => OpsVal::Target(vec![cs], Box::new(opsval)),
-    }))
 }
 
 
