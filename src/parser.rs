@@ -452,13 +452,13 @@ mod test_parser {
     #[test]
     fn test_roll_reroll() {
         assert_eq!(
-            roll("d10r10r>2"),
+            roll("d10ro10r>2"),
             Ok(("", Roll(
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Reroll(ComparePoint::Eq(10)),
-                    RollMeta::Reroll(ComparePoint::Gt(2)),
+                    RollMeta::Reroll(Reroll::Once, ComparePoint::Eq(10)),
+                    RollMeta::Reroll(Reroll::Everytime, ComparePoint::Gt(2)),
                 ]
             )))
         );
@@ -683,7 +683,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Exploding(ComparePoint::IEq)
+                    RollMeta::Exploding(Exploding::Exploding, ComparePoint::IEq)
                 ]
             )))
         );
@@ -697,7 +697,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Exploding(ComparePoint::Eq(10))
+                    RollMeta::Exploding(Exploding::Exploding, ComparePoint::Eq(10))
                 ]
             )))
         );
@@ -711,7 +711,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Exploding(ComparePoint::Eq(10))
+                    RollMeta::Exploding(Exploding::Exploding, ComparePoint::Eq(10))
                 ]
             )))
         );
@@ -726,7 +726,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Exploding(ComparePoint::Gt(10))
+                    RollMeta::Exploding(Exploding::Exploding, ComparePoint::Gt(10))
                 ]
             )))
         );
@@ -740,7 +740,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Exploding(ComparePoint::Lt(10))
+                    RollMeta::Exploding(Exploding::Exploding, ComparePoint::Lt(10))
                 ]
             )))
         );
@@ -754,7 +754,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Compounding(ComparePoint::Lt(10))
+                    RollMeta::Exploding(Exploding::Compounding, ComparePoint::Lt(10)),
                 ]
             )))
         );
@@ -768,7 +768,7 @@ mod test_parser {
                 1,
                 Dice::Dice(10),
                 vec![
-                    RollMeta::Penetrating(ComparePoint::Lt(10))
+                    RollMeta::Exploding(Exploding::Penetrating, ComparePoint::Lt(10)),
                 ]
             )))
         );
@@ -809,94 +809,86 @@ mod test_parser {
     #[test]
     fn test_roll_unspecified_roll_meta_eq() {
         assert_eq!(
-            target("d10=2"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Eq(2))],
-                Box::new(OpsVal::Roll(Roll(
+            expr("d10=2"),
+            Ok(("", OpsVal::Roll(Roll(
                     1,
                     Dice::Dice(10),
-                    vec![]
-                )))
-            )))
+                    vec![RollMeta::Target(Critical::Success, ComparePoint::Eq(2))]
+            ))))
         );
     }
 
     #[test]
     fn test_roll_unspecified_roll_meta_lt() {
         assert_eq!(
-            target("d10<2"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Lt(2))],
-                Box::new(OpsVal::Roll(Roll(
+            expr("d10<2"),
+            Ok(("", OpsVal::Roll(Roll(
                     1,
                     Dice::Dice(10),
-                    vec![]
-                )))
-            )))
+                    vec![RollMeta::Target(Critical::Success, ComparePoint::Lt(2))]
+            ))))
         );
     }
 
     #[test]
     fn test_roll_unspecified_roll_meta_gt() {
         assert_eq!(
-            target("d10>2"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Gt(2))],
-                Box::new(OpsVal::Roll(Roll(
+            expr("d10>2"),
+            Ok(("", OpsVal::Roll(Roll(
                     1,
                     Dice::Dice(10),
-                    vec![]
-                )))
-            )))
+                    vec![RollMeta::Target(Critical::Success, ComparePoint::Gt(2))]
+            ))))
         );
     }
 
     #[test]
     fn test_roll_dice_nested_meta() {
         assert_eq!(
-            target("d10!3d1>2"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Gt(2))],
-                Box::new(OpsVal::Roll(Roll(
+            expr("d10!3d1>2"),
+            Ok(("", OpsVal::Roll(Roll(
                     1,
                     Dice::Dice(10),
                     vec![
-                        RollMeta::Exploding(ComparePoint::Eq(3)),
+                        RollMeta::Exploding(Exploding::Exploding, ComparePoint::Eq(10)),
                         RollMeta::Drop(HiLo::Low, 1),
+                        RollMeta::Target(Critical::Success, ComparePoint::Gt(2))
                     ]
-                )))
-            )))
+            ))))
         );
     }
 
     #[test]
     fn test_roll_braced_meta() {
         assert_eq!(
-            target("{d10!}>2"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Gt(2))],
-                Box::new(OpsVal::Roll(Roll(
-                    1,
-                    Dice::Dice(10),
-                    vec![
-                        RollMeta::Exploding(ComparePoint::IEq),
-                    ]
-                )))
-            )))
+            expr("{d10!}>2"),
+            Ok(("", OpsVal::GroupRoll(GroupRoll(
+                vec![
+                    OpsVal::Roll(Roll(
+                        1,
+                        Dice::Dice(10),
+                        vec![
+                            RollMeta::Exploding(Exploding::Exploding, ComparePoint::IEq),
+                        ]
+                    ))
+                ],
+                vec![GroupMeta::Target(Critical::Success, ComparePoint::Gt(3))],
+            ))))
         );
     }
 
     #[test]
     fn test_roll_target_modifier() {
         assert_eq!(
-            target("d10+1>3"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Gt(3))],
-                Box::new(OpsVal::Expr(
+            expr("d10+1>3"),
+            Ok(("", OpsVal::Expr(
                     Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10), vec![]))),
+                    Box::new(OpsVal::Roll(Roll(
+                        1,
+                        Dice::Dice(10),
+                        vec![RollMeta::Target(Critical::Success, ComparePoint::Gt(3))]
+                    ))),
                     Box::new(OpsVal::Number(1))
-                ))
             )))
         );
     }
@@ -904,15 +896,17 @@ mod test_parser {
     #[test]
     fn test_roll_target_modifier_braced() {
         assert_eq!(
-            target("{d10+1}>3"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Gt(3))],
-                Box::new(OpsVal::Expr(
-                    Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10), vec![]))),
-                    Box::new(OpsVal::Number(1))
-                ))
-            )))
+            expr("{d10+1}>3"),
+            Ok(("", OpsVal::GroupRoll(GroupRoll(
+                vec![
+                    OpsVal::Expr(
+                        Oper::Add,
+                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10), vec![]))),
+                        Box::new(OpsVal::Number(1))
+                    )
+                ],
+                vec![GroupMeta::Target(Critical::Success, ComparePoint::Gt(3))],
+            ))))
         );
     }
 
@@ -950,10 +944,8 @@ mod test_parser {
     #[test]
     fn test_list_group_target_roll() {
         assert_eq!(
-            target("{2d10,2d10+2d2}kh2>3"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Success(ComparePoint::Gt(3))],
-                Box::new(OpsVal::GroupRoll(GroupRoll(
+            expr("{2d10,2d10+2d2}kh2>3"),
+            Ok(("", OpsVal::GroupRoll(GroupRoll(
                     vec![
                         OpsVal::Roll(Roll(2, Dice::Dice(10), vec![])),
                         OpsVal::Expr(
@@ -962,9 +954,11 @@ mod test_parser {
                             Box::new(OpsVal::Roll(Roll(2, Dice::Dice(2), vec![]))),
                         )
                     ],
-                    vec![GroupMeta::Keep(HiLo::High, 2)],
-                )))
-            )))
+                    vec![
+                        GroupMeta::Keep(HiLo::High, 2),
+                        GroupMeta::Target(Critical::Success, ComparePoint::Gt(3)),
+                    ],
+            ))))
         );
     }
 
@@ -972,22 +966,19 @@ mod test_parser {
     fn test_roll_unspecified_roll_meta_fail_eq() {
         // TODO: this should fail, and should only work for d10=2f=4 for eg
         assert_eq!(
-            target("d10f=2"),
-            Ok(("", OpsVal::Target(
-                vec![Critical::Fail(ComparePoint::Eq(2))],
-                Box::new(OpsVal::Roll(Roll(
+            expr("d10f=2"),
+            Ok(("", OpsVal::Roll(Roll(
                     1,
                     Dice::Dice(10),
-                    vec![]
-                )))
-            )))
+                    vec![RollMeta::Target(Critical::Fail, ComparePoint::Eq(2))],
+            ))))
         );
     }
 
 //    #[test]
 //    fn test_roll_unspecified_roll_meta_success_fail_eq() {
 //        assert_eq!(
-//            target("d10=2f=3"),
+//            expr("d10=2f=3"),
 //            Ok(("", OpsVal::Target(
 //                vec![
 //                    Critical::Success(ComparePoint::Eq(2)),
