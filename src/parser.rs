@@ -870,7 +870,7 @@ mod test_parser {
                     1,
                     Dice::Dice(10),
                     vec![
-                        RollMeta::Exploding(Exploding::Exploding, ComparePoint::Eq(10)),
+                        RollMeta::Exploding(Exploding::Exploding, ComparePoint::Eq(3)),
                         RollMeta::Drop(HiLo::Low, 1),
                         RollMeta::Target(Critical::Success, ComparePoint::Gt(2))
                     ]
@@ -892,24 +892,8 @@ mod test_parser {
                         ]
                     ))
                 ],
-                vec![GroupMeta::Target(Critical::Success, ComparePoint::Gt(3))],
+                vec![GroupMeta::Target(Critical::Success, ComparePoint::Gt(2))],
             ))))
-        );
-    }
-
-    #[test]
-    fn test_roll_target_modifier() {
-        assert_eq!(
-            expr("d10+1>3"),
-            Ok(("", OpsVal::Expr(
-                    Oper::Add,
-                    Box::new(OpsVal::Roll(Roll(
-                        1,
-                        Dice::Dice(10),
-                        vec![RollMeta::Target(Critical::Success, ComparePoint::Gt(3))]
-                    ))),
-                    Box::new(OpsVal::Number(1))
-            )))
         );
     }
 
@@ -921,7 +905,7 @@ mod test_parser {
                 vec![
                     OpsVal::Expr(
                         Oper::Add,
-                        Box::new(OpsVal::Roll(Roll(2, Dice::Dice(10), vec![]))),
+                        Box::new(OpsVal::Roll(Roll(1, Dice::Dice(10), vec![]))),
                         Box::new(OpsVal::Number(1))
                     )
                 ],
