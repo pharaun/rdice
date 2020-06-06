@@ -164,26 +164,8 @@ fn number(input: &str) -> IResult<&str, Num> {
     map(input)
 }
 
-// TODO: have a final fallback option? in the alt for IEq?
-fn compare_point(input: &str) -> IResult<&str, ComparePoint> {
-    let (input, oper) = opt(alt((
-        map(
-            preceded(tag(">"), number),
-            |i| ComparePoint::Gt(i)
-        ),
-        map(
-            preceded(tag("<"), number),
-            |i| ComparePoint::Lt(i)
-        ),
-        map(
-            preceded(tag("="), number),
-            |i| ComparePoint::Eq(i)
-        ),
-        map(
-            number,
-            |i| ComparePoint::Eq(i)
-        )),
-    ))(input)?;
+fn implied_compare_point(input: &str) -> IResult<&str, ComparePoint> {
+    let (input, oper) = opt(compare_point)(input)?;
 
     Ok((
         input,
@@ -192,6 +174,15 @@ fn compare_point(input: &str) -> IResult<&str, ComparePoint> {
             Some(x) => x,
         }
     ))
+}
+
+fn compare_point(input: &str) -> IResult<&str, ComparePoint> {
+    alt((
+        map(preceded(tag(">"), number), |i| ComparePoint::Gt(i)),
+        map(preceded(tag("<"), number), |i| ComparePoint::Lt(i)),
+        map(preceded(tag("="), number), |i| ComparePoint::Eq(i)),
+        map(number, |i| ComparePoint::Eq(i)),
+    ))(input)
 }
 
 fn digit_dice(input: &str) -> IResult<&str, Dice> {
@@ -238,23 +229,23 @@ fn keep_meta(input: &str) -> IResult<&str, (HiLo, Num)> {
 
 fn reroll_meta(input: &str) -> IResult<&str, (Reroll, ComparePoint)> {
     alt((
-        map(preceded(tag("ro"), compare_point), |i| (Reroll::Once, i)),
-        map(preceded(tag("r"), compare_point), |i| (Reroll::Everytime, i)),
+        map(preceded(tag("ro"), implied_compare_point), |i| (Reroll::Once, i)),
+        map(preceded(tag("r"), implied_compare_point), |i| (Reroll::Everytime, i)),
     ))(input)
 }
 
 fn exploding_meta(input: &str) -> IResult<&str, (Exploding, ComparePoint)> {
     alt((
-        map(preceded(tag("!!"), compare_point), |i| (Exploding::Compounding, i)),
-        map(preceded(tag("!p"), compare_point), |i| (Exploding::Penetrating, i)),
-        map(preceded(tag("!"), compare_point), |i| (Exploding::Exploding, i)),
+        map(preceded(tag("!!"), implied_compare_point), |i| (Exploding::Compounding, i)),
+        map(preceded(tag("!p"), implied_compare_point), |i| (Exploding::Penetrating, i)),
+        map(preceded(tag("!"), implied_compare_point), |i| (Exploding::Exploding, i)),
     ))(input)
 }
 
 fn matching_meta(input: &str) -> IResult<&str, (Matching, ComparePoint)> {
     alt((
-        map(preceded(tag("mt"), compare_point), |i| (Matching::Target, i)),
-        map(preceded(tag("m"), compare_point), |i| (Matching::Matching, i)),
+        map(preceded(tag("mt"), implied_compare_point), |i| (Matching::Target, i)),
+        map(preceded(tag("m"), implied_compare_point), |i| (Matching::Matching, i)),
     ))(input)
 }
 
@@ -269,8 +260,7 @@ fn sort_meta(input: &str) -> IResult<&str, SortOrder> {
 fn critical_meta(input: &str) -> IResult<&str, (Critical, ComparePoint)> {
     alt((
         map(preceded(tag("f"), compare_point), |i| (Critical::Fail, i)),
-        map(preceded(tag("f"), compare_point), |i| (Critical::Fail, i)),
-        //map(compare_point, |i| (Critical::Success, i)),
+        map(compare_point, |i| (Critical::Success, i)),
     ))(input)
 }
 
@@ -289,8 +279,6 @@ fn roll_meta(input: &str) -> IResult<&str, RollMeta> {
 fn roll(input: &str) -> IResult<&str, Roll> {
     let (input, roll) = opt(number)(input)?;
     let (input, dice) = dice(input)?;
-
-    // TODO: The problem isn't roll_meta, but something here
     let (input, meta) = many0(roll_meta)(input)?;
 
     Ok((input,
@@ -301,65 +289,11 @@ fn roll(input: &str) -> IResult<&str, Roll> {
     ))
 }
 
-#[cfg(test)]
-mod test_meta {
-    use super::*;
-
-    #[test]
-    fn test_numbber() {
-        assert_eq!(
-            roll("d10"),
-            Ok(("",
-                Roll(
-                    1,
-                    Dice::Dice(10),
-                    vec![]
-                )
-            ))
-        );
-    }
-
-    #[test]
-    fn test_number() {
-        assert_eq!(
-            roll("d10f=3"),
-            Ok(("",
-                Roll(
-                    1,
-                    Dice::Dice(10),
-                    vec![
-                        RollMeta::Target(Critical::Fail, ComparePoint::Eq(3))
-                    ]
-                )
-            ))
-        );
-    }
-
-    #[test]
-    fn test_anumber() {
-        assert_eq!(
-            roll("d10=3"),
-            Ok(("",
-                Roll(
-                    1,
-                    Dice::Dice(10),
-                    vec![
-                        RollMeta::Target(Critical::Success, ComparePoint::Eq(3))
-                    ]
-                )
-            ))
-        );
-    }
-}
-
 fn group_meta(input: &str) -> IResult<&str, GroupMeta> {
     alt((
         map(drop_meta, |(h, i)| GroupMeta::Drop(h, i)),
         map(keep_meta, |(h, i)| GroupMeta::Keep(h, i)),
-
-        // Critical
-        map(preceded(tag("f"), compare_point), |i| GroupMeta::Target(Critical::Fail, i)),
-//        map(compare_point, |i| GroupMeta::Target(Critical::Success, i)),
+        map(critical_meta, |(c, i)| GroupMeta::Target(c, i)),
     ))(input)
 }
 
@@ -462,6 +396,22 @@ fn expr(input: &str) -> IResult<&str, OpsVal> {
 #[cfg(test)]
 mod test_parser {
     use super::*;
+
+    #[test]
+    fn test_critical_fail() {
+        assert_eq!(
+            critical_meta("f=3"),
+            Ok(("", (Critical::Fail, ComparePoint::Eq(3))))
+        );
+    }
+
+    #[test]
+    fn test_critical_success() {
+        assert_eq!(
+            critical_meta("=3"),
+            Ok(("", (Critical::Success, ComparePoint::Eq(3))))
+        );
+    }
 
     #[test]
     fn test_number() {
