@@ -17,7 +17,7 @@ use nom::{
   },
   multi::{
       many0,
-      separated_nonempty_list,
+      separated_list1,
   },
 };
 
@@ -159,7 +159,7 @@ fn number(input: &str) -> IResult<&str, Num> {
 
     let is_digit = |c: char| c.is_digit(radix);
     let from_digit = |s: &str| u32::from_str_radix(s, radix);
-    let map = map_res(take_while1(is_digit), from_digit);
+    let mut map = map_res(take_while1(is_digit), from_digit);
 
     map(input)
 }
@@ -300,7 +300,7 @@ fn group_meta(input: &str) -> IResult<&str, GroupMeta> {
 fn group_roll(input: &str) -> IResult<&str, GroupRoll> {
     let (input, opsvals) = delimited(
         tag("{"),
-        separated_nonempty_list(tag(","), expr),
+        separated_list1(tag(","), expr),
         tag("}")
     )(input)?;
     let (input, meta) = many0(group_meta)(input)?;

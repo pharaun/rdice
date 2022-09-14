@@ -2,8 +2,8 @@
 name = "rdice"
 version = "0.1.0"
 authors = ["Anja Berens <pharaun666@gmail.com>"]
-edition = "2018"
+edition = "2021"
 
 [dependencies]
-rand = "0.7.2"
-nom = "5"
+rand = "0.8"
+nom = "7"
