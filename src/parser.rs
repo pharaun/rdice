@@ -25,7 +25,7 @@ pub fn parse(input: &str) -> IResult<&str, OpsVal> {
     expr(input)
 }
 
-type Num = u32;
+pub type Num = u32;
 
 // TODO: computed dice (N+Y)dX/Nd(X+Y) (basic + fate)
 #[derive(Debug, PartialEq)]
@@ -41,9 +41,11 @@ pub enum Dice {
 // TODO: RollMeta -> Vec, because can have multiple effects on a roll pool (ie keep, drop, ...)
 // TODO: computed dice (N+Y)dX/Nd(X+Y) (basic + fate)
 #[derive(Debug, PartialEq)]
-pub struct Roll(Num, Dice, Vec<RollMeta>);
+pub struct Roll(pub Num, pub Dice, pub Vec<RollMeta>);
 
 // TODO: have two type of meta, one for fate and one for regular dice rolls (if needed)
+// TODO: this should be parsed out, then re-sorted into a struct containing the list of each
+// meta
 #[derive(Debug, PartialEq)]
 pub enum RollMeta {
     // * Matching
@@ -118,7 +120,7 @@ pub enum Matching {
 // List of OpsVal::Roll or list of opsval expr whatever
 // TODO: have this be a collection of Rolls (possibly a restricted RollMeta for inside a group)
 #[derive(Debug, PartialEq)]
-pub struct GroupRoll(Vec<OpsVal>, Vec<GroupMeta>);
+pub struct GroupRoll(pub Vec<OpsVal>, pub Vec<GroupMeta>);
 
 // TODO: maybe instead of having a drop/keep meta on roll we make all roll go into a group and if
 // there's more than 1 it can do special handling? For now -> roll or -> roll -> group.
